@@ -87,7 +87,7 @@ class CardCombos:
         for combos in tqdm(
             start_combos,
             dynamic_ncols=True,
-            desc=f"Creating {betting_stage} info combos",
+            desc=f"Creating {betting_stage} info combosss",
         ):
             # Descending sort combos.
             sorted_combos: List[Card] = sorted(
