@@ -53,6 +53,7 @@ class CardCombos:
         -------
             Combos of cards (Card) -> np.ndarray
         """
+        print(np.array([c for c in combinations(self._cards, num_cards)]))
         return np.array([c for c in combinations(self._cards, num_cards)])
 
     def create_info_combos(
@@ -89,6 +90,7 @@ class CardCombos:
             dynamic_ncols=True,
             desc=f"Creating {betting_stage} info combosss",
         ):
+            print(combos)
             # Descending sort combos.
             sorted_combos: List[Card] = sorted(
                 list(combos),

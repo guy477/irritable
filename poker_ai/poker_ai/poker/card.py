@@ -175,14 +175,14 @@ class Card:
             raise NotImplementedError(f"Unrecognised dict {x}")
         return Card(rank=x["rank"], suit=x["suit"])
 
-    def to_dict(self) -> Dict[str, Union[int, str]]:
-        """Turn into dict."""
-        return dict(rank=self._rank, suit=self._suit)
+    # def to_dict(self) -> Dict[str, Union[int, str]]:
+    #     """Turn into dict."""
+    #     return dict(rank=self._rank, suit=self._suit)
 
-    @staticmethod
-    def from_dict(x: Dict[str, Union[int, str]]):
-        """From dict turn into class."""
-        if set(x) != {"rank", "suit"}:
-            raise NotImplementedError(f"Unrecognised dict {x}")
-        return Card(rank=x["rank"], suit=x["suit"])
+    # @staticmethod
+    # def from_dict(x: Dict[str, Union[int, str]]):
+    #     """From dict turn into class."""
+    #     if set(x) != {"rank", "suit"}:
+    #         raise NotImplementedError(f"Unrecognised dict {x}")
+    #     return Card(rank=x["rank"], suit=x["suit"])
 
