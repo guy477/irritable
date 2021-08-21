@@ -5,6 +5,8 @@ import threading
 import itertools
 import timeit
 import struct
+import copy
+import time
 from eval7 import Card, evaluate
 
 
@@ -14,6 +16,11 @@ class cluster:
     def __init__(self):
         self.rank = {0 : '2', 1: '3', 2: '4', 3: '5', 4: '6', 5: '7', 6: '8', 7: '9', 8: 'T', 9: 'J', 10: 'Q', 11: 'K', 12: 'A'}
         self.suit = {0: 's', 1: 'h', 2: 'd', 3: 'c'}
+        
+        # self.evalCards = {}
+        # for c in [(s, Card(self.get_card(s))) for s in range(52)]:
+        #     self.evalCards[c[0]] = c[1]
+        # print(self.evalCards)
         self.run()
 
         
@@ -23,7 +30,7 @@ class cluster:
         threads = 8
 
         k = 5
-        n = 52
+        n = 16
         # n = 15
 
         self.dat_y = self.nump2(n, k)
@@ -43,7 +50,7 @@ class cluster:
 
         
         # y = np.memmap('/media/poker_raw/river.npy', mode = 'r+', dtype = np.uint8, shape = (2598960,5))
-        y = np.memmap('/media/poker_raw/river.npy', mode = 'r+', dtype = np.uint8, shape = (self.dat_y.shape[0],5))        
+        y = np.memmap('/media/poker_raw/river.npy', mode = 'w+', dtype = np.uint8, shape = (self.dat_y.shape[0],5))        
         yy = np.memmap('/media/poker_raw/turn.npy', mode = 'r+', dtype = np.uint8, shape = (self.dat_yy.shape[0],4))
         yyy = np.memmap('/media/poker_raw/flop.npy', mode = 'r+', dtype = np.uint8, shape = (self.dat_yyy.shape[0],3))
         
@@ -51,15 +58,15 @@ class cluster:
         yy[:] = self.dat_yy[:]
         yyy[:] = self.dat_yyy[:]   
 
-        y.flush()
-        yy.flush()
-        yyy.flush()
+        # y.flush()
+        # yy.flush()
+        # yyy.flush()
 
         print(y)
         print(len(y))
         print(y.shape)        
 
-        # # z = np.memmap('/media/poker_raw/cartesianRiver.npy', mode = 'w+', dtype = np.uint8, shape = (y.shape[0] * x.shape[0], y.shape[1] + x.shape[1]))
+        # z = np.memmap('/media/poker_raw/cartesianRiver.npy', mode = 'w+', dtype = np.uint8, shape = (y.shape[0] * x.shape[0], y.shape[1] + x.shape[1]))
         
         
         
@@ -83,7 +90,7 @@ class cluster:
         #     print(sum(output))
 
         z = np.memmap('/media/poker_raw/cartesianRiver.npy', mode = 'r', dtype = np.uint8, shape = (y.shape[0] * x.shape[0], y.shape[1] + x.shape[1]))
-        
+        print(z)
         self.numbad = 0
         # 480200 bad datapoints per starting hand
         for i in range(0, self.dat_y.shape[0]):
@@ -92,34 +99,34 @@ class cluster:
         print(self.numbad)
 
 
-        # xyz = np.memmap('/media/poker_raw/PMAP_River.npy', mode = 'w+', dtype = np.uint8, shape = ((y.shape[0] - self.numbad) * x.shape[0], y.shape[1] + x.shape[1] + 8))
-
-        # with concurrent.futures.ProcessPoolExecutor() as executor:
-        #     # change crnt to appropriate number of workers for your system
-        #     crnt = (threads - 1)
-        #     futures = []
-        #     chunksize = len(x) // crnt
+        xyz = np.memmap('/media/poker_raw/PMAP_River.npy', mode = 'w+', dtype = np.int16, shape = ((y.shape[0] - self.numbad) * x.shape[0], y.shape[1] + x.shape[1] + 3))
+        # xyz = np.memmap('/media/poker_raw/PMAP_River_expo.npy', mode = 'w+', dtype = np.int16, shape = (y.shape[0] * x.shape[0], y.shape[1] + x.shape[1] + 3))
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            # change crnt to appropriate number of workers for your system
+            crnt = (threads//2)
+            futures = []
+            chunksize = len(x) // crnt
             
-        #     for i in range(crnt):
+            for i in range(crnt):
                 
-        #         strt = i * chunksize
-        #         stp = ((i + 1) * chunksize) if i != (crnt - 1) else len(x)
-        #         # print(x[strt:stp])
-        #         futures.append(executor.submit(self.par_combine_filter_river ,x,strt,stp))
-        #     concurrent.futures.wait(futures)
+                strt = i * chunksize
+                stp = ((i + 1) * chunksize) if i != (crnt - 1) else len(x)
+                # print(x[strt:stp])
+                futures.append(executor.submit(self.par_combine_filter_river ,x.tolist(),strt,stp))
+            concurrent.futures.wait(futures)
 
-        #     output = [f.result() for f in futures]
+            output = [f.result() for f in futures]
 
-        #     print(output)
-        #     # print(sum(output))
+            print(output)
+            # print(sum(output))
 
         self.mp_hand = self.map_indices_by_hand(x)
         self.mp_table_river = self.map_indices(self.dat_y)
         self.mp_table_turn = self.map_indices(self.dat_yy)
         self.mp_table_flop = self.map_indices(self.dat_yyy)
-        self.combine_filter_river(x)
 
-        xyz = np.memmap('/media/poker_raw/PMAP_River.npy', mode = 'r', dtype = np.uint8, shape = ((y.shape[0] - self.numbad) * x.shape[0], y.shape[1] + x.shape[1] + 8))
+        xyz = np.memmap('/media/poker_raw/PMAP_River.npy', mode = 'r', dtype = np.uint8, shape = ((y.shape[0] - self.numbad) * x.shape[0], y.shape[1] + x.shape[1] + 3))
+        # xyz = np.memmap('/media/poker_raw/PMAP_River.npy', mode = 'r', dtype = np.int16, shape = (y.shape[0] * x.shape[0], y.shape[1] + x.shape[1] + 3))
         print(xyz)
         
 
@@ -155,7 +162,7 @@ class cluster:
 
 
         
-        # xyyz = np.memmap('/media/poker_raw/PMAP_turn.npy', mode = 'w+', dtype = np.uint8, shape = ((yy.shape[0] - self.numbad) * x.shape[0], yy.shape[1] + x.shape[1] + 8))
+        # xyyz = np.memmap('/media/poker_raw/PMAP_turn.npy', mode = 'w+', dtype = np.uint8, shape = ((yy.shape[0] - self.numbad) * x.shape[0], yy.shape[1] + x.shape[1] + 3))
         
         # with concurrent.futures.ProcessPoolExecutor() as executor:
         #     # change crnt to appropriate number of workers for your system
@@ -208,7 +215,7 @@ class cluster:
 
 
         
-        # xyyyz = np.memmap('/media/poker_raw/PMAP_flop.npy', mode = 'w+', dtype = np.uint8, shape = ((yyy.shape[0] - self.numbad) * x.shape[0], yyy.shape[1] + x.shape[1] + 8))
+        # xyyyz = np.memmap('/media/poker_raw/PMAP_flop.npy', mode = 'w+', dtype = np.uint8, shape = ((yyy.shape[0] - self.numbad) * x.shape[0], yyy.shape[1] + x.shape[1] + 3))
         
 
         # with concurrent.futures.ProcessPoolExecutor() as executor:
@@ -246,10 +253,10 @@ class cluster:
         # print(xyyz)
         # print(xyyyz)
 
-    
+
     def get_ehs_fast(self, combo):
-        x = list(range(52))
-        j = combo.tolist()
+        x = list(range(16))
+        j = combo
         for i in j:
             x.remove(i)
 
@@ -258,8 +265,7 @@ class cluster:
         wlt = [0, 0, 0]
         for i in range(0, len(x)-1):
             for k in range(i+1, len(x)):
-                
-                vil = evaluate([Card(self.get_card(s)) for s in j[2:] + [x[i], x[k]]])
+                vil = evaluate([Card(self.get_card(s)) for s in [x[i], x[k]]+ j[2:]])
                 if(hero > vil):
                     wlt[1] += 1
                 elif(vil > hero):
@@ -267,10 +273,6 @@ class cluster:
                 else:
                     wlt[0] += 1
         
-        s = sum(wlt)
-        wlt[0] /= s
-        wlt[1] /= s
-        wlt[2] /= s
         return wlt
 
     def get_ehs(self, combo):
@@ -376,62 +378,27 @@ class cluster:
         
         return (self.rank[x%13] + self.suit[x//13])
 
-    # using the mappings and updating everything at once, receive exponential speed up
-    def combine_filter_river(self, x):
-        y = np.memmap('/media/poker_raw/river.npy', mode = 'r', dtype = np.uint8, shape = (self.dat_y.shape[0],5))
-        z = np.memmap('/media/poker_raw/cartesianRiver.npy', mode = 'r', dtype = np.uint8, shape = (y.shape[0] * x.shape[0], x.shape[1] + y.shape[1]))
-        xyz = np.memmap('/media/poker_raw/PMAP_River.npy', mode = 'r+', dtype = np.uint8, shape = ((self.dat_y.shape[0] - self.numbad) * x.shape[0], self.dat_y.shape[1] + x.shape[1] + 8))
-        idx = 0
-        bite = []
-        print((y.shape[0] - self.numbad))
-        for i in z:
-            if(not self.contains_duplicates(i)):
-                bite = self.get_ehs_fast(i)
-
-                xyz[idx][:7] = i
-                xyz[idx][7:11] = [c for c in struct.pack('!f', bite[0])]
-                xyz[idx][11:] = [c for c in struct.pack('!f', bite[1])]
-                                
-                # print(struct.unpack('!f', xyz[idx][-4:]))
-                # print(str([self.get_card(x) for x in xyz[idx][:7]]) + ' - ' + str(struct.unpack('!f', xyz[idx][-8:-4])[0]) + str(struct.unpack('!f', xyz[idx][-4:])[0]))
-                # print(struct.unpack('!f', xyz[idx][-8:-4])[0])
-                # print(struct.unpack('!f', xyz[idx][-4:])[0])
-                
-                idx += 1
-                # print(idx)
-                if(((idx + 1) % (y.shape[0] - self.numbad)) == 0):
-                    print(xyz[idx])
-                    xyz.flush()
-
     def par_combine_filter_river(self, x, start, stop):
         xx = x[start:stop]
         y = np.memmap('/media/poker_raw/river.npy', mode = 'r', dtype = np.uint8, shape = (self.dat_y.shape[0],5))
-        z = np.memmap('/media/poker_raw/cartesianRiver.npy', mode = 'r', dtype = np.uint8, shape = (y.shape[0] * xx.shape[0], xx.shape[1] + y.shape[1]), offset = (start) * y.shape[0] * 7)
-        xyz = np.memmap('/media/poker_raw/PMAP_River.npy', mode = 'r+', dtype = np.uint8, shape = ((self.dat_y.shape[0] - self.numbad) * xx.shape[0], self.dat_y.shape[1] + xx.shape[1] + 8), offset = (start) * (y.shape[0]-self.numbad) * (self.dat_y.shape[1] + xx.shape[1] + 8))
+        # z = np.memmap('/media/poker_raw/cartesianRiver.npy', mode = 'r', dtype = np.uint8, shape = (y.shape[0] * xx.shape[0], xx.shape[1] + y.shape[1]), offset = (start) * y.shape[0] * 7)
+        xyz = np.memmap('/media/poker_raw/PMAP_River.npy', mode = 'r+', dtype = np.int16, shape = ((self.dat_y.shape[0] - self.numbad) * len(xx), self.dat_y.shape[1] + len(xx[0]) + 3), offset = (start) * (y.shape[0]) * (self.dat_y.shape[1] + len(xx[0]) + 3))
+        y = y.tolist()
         idx = 0
-        bite = []
-        print((y.shape[0] - self.numbad))
-        for i in z:
-            if(not self.contains_duplicates(i)):
-                bite = self.get_ehs_fast(i)
-
-                xyz[idx][:7] = i
-                xyz[idx][7:11] = [c for c in struct.pack('!f', bite[0])]
-                xyz[idx][11:] = [c for c in struct.pack('!f', bite[1])]
-                                
-                # print(struct.unpack('!f', xyz[idx][-4:]))
-                # print(str([self.get_card(x) for x in xyz[idx][:7]]) + ' - ' + str(struct.unpack('!f', xyz[idx][-8:-4])[0]) + str(struct.unpack('!f', xyz[idx][-4:])[0]))
-                # print(struct.unpack('!f', xyz[idx][-8:-4])[0])
-                # print(struct.unpack('!f', xyz[idx][-4:])[0])
+        now = time.time()
+        c = 0
+        for j in y:
+            for k in xx:
+                i = k + j
+                if(not self.contains_duplicates(i)):
+                    xyz[idx] = i + self.get_ehs_fast(i)
+                    idx += 1
                 
-                idx += 1
-                # print(idx)
-                if(((idx + 1) % (y.shape[0] - self.numbad)) == 0):
-                    print(xyz[idx])
-                    xyz.flush()
-            
-        
-        xyz.flush()
+            print(xyz[idx-1])
+            print(str((time.time() - now) * (len(y) - c) // 60) + ' minutes until end ~~')
+            c += 1
+            now = time.time()
+            xyz.flush()
         
 
 
@@ -439,7 +406,7 @@ class cluster:
         xx = x[start:stop]
         y = np.memmap('/media/poker_raw/turn.npy', mode = 'r', dtype = np.uint8, shape = (self.dat_yy.shape[0],4))
         z = np.memmap('/media/poker_raw/cartesianTurn.npy', mode = 'r', dtype = np.uint8, shape = (y.shape[0] * xx.shape[0], xx.shape[1] + y.shape[1]), offset = (start) * y.shape[0] * 6)
-        xyz = np.memmap('/media/poker_raw/PMAP_Turn.npy', mode = 'r+', dtype = np.uint8, shape = ((self.dat_yy.shape[0] - self.numbad) * xx.shape[0], self.dat_yy.shape[1] + xx.shape[1] + 8))
+        xyz = np.memmap('/media/poker_raw/PMAP_Turn.npy', mode = 'r+', dtype = np.uint8, shape = ((self.dat_yy.shape[0] - self.numbad) * xx.shape[0], self.dat_yy.shape[1] + xx.shape[1] + 3))
         idx = 0
         j = 0
         for i in z.tolist():
@@ -455,7 +422,7 @@ class cluster:
         xx = x[start:stop]
         y = np.memmap('/media/poker_raw/flop.npy', mode = 'r', dtype = np.uint8, shape = (self.dat_yyy.shape[0],3))
         z = np.memmap('/media/poker_raw/cartesianFlop.npy', mode = 'r', dtype = np.uint8, shape = (y.shape[0] * xx.shape[0], xx.shape[1] + y.shape[1]), offset = (start) * y.shape[0] * 5)
-        xyz = np.memmap('/media/poker_raw/PMAP_Flop.npy', mode = 'r+', dtype = np.uint8, shape = ((self.dat_yyy.shape[0] - self.numbad) * xx.shape[0], self.dat_yyy.shape[1] + xx.shape[1] + 8))
+        xyz = np.memmap('/media/poker_raw/PMAP_Flop.npy', mode = 'r+', dtype = np.uint8, shape = ((self.dat_yyy.shape[0] - self.numbad) * xx.shape[0], self.dat_yyy.shape[1] + xx.shape[1] + 3))
         idx = 0
         j = 0
         for i in z.tolist():
