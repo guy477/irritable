@@ -206,14 +206,13 @@ cdef numpy.npy_bool contains(int16[:] XX, int comp) nogil:
 #  
 @cython.boundscheck(False) 
 @cython.wraparound(False)
-cdef int16[:] get_ehs_fast(int16[:] j):
-    cdef int16 twl_tiewinloss[3]
+cdef void get_ehs_fast(int16[:] j, int16[:] twl_tiewinloss):
     cdef int16 x[45]
     cdef int16 i, k
     cdef int hero, v, c
 
     cdef unsigned int seven = 7
-    
+
     twl_tiewinloss[0] = 0
     twl_tiewinloss[1] = 0
     twl_tiewinloss[2] = 0
@@ -238,13 +237,15 @@ cdef int16[:] get_ehs_fast(int16[:] j):
             else:
                 twl_tiewinloss[0] += 1
     
-    return twl_tiewinloss
+    #return twl_tiewinloss
 
 
 # 
-# All major computation is done in C. Only remaining overhead is in the 'get_ehs_fast'
-# function call. Solution is likely to send the whole z_view row and let get_ehs_fast
-# return the same row.
+# All major computation is done in C. Only remaining overhead is encountered in the
+# below function. For each of the (legal) C(52, 2) * C(50, 5) combinations that represent all 
+# of hero's hand/table combos we make C(45, 2) comparisons with the other legal villian hands.
+# The cumulative runtime exists somewhere between O(C(52, 7) * C(45, 2)) and O(C(52, 2) * C(52, 5) * C(45, 2))
+# Will formally calculate at another time. ~it go fast~
 # 
 @cython.boundscheck(False) 
 @cython.wraparound(False)
@@ -262,8 +263,6 @@ cpdef do_calc(int16[:, :] x, int16[:, :] y, int id):
     cdef int16 [:, :] z_view = z
     cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(7, dtype=numpy.int16)
     cdef int16 [:] oh_view = oh
-
-
     for i in range(x_shape):
         t1=time.time()
         for j in range(y_shape):
@@ -271,7 +270,7 @@ cpdef do_calc(int16[:, :] x, int16[:, :] y, int id):
             oh_view[2:] = y[j]
             if(not contains_duplicates(oh_view)):
                 z_view[c][:7] =  oh_view
-                z_view[c][7:] = get_ehs_fast(oh_view)
+                get_ehs_fast(oh_view, z_view[c][7:])
             c += 1
         t2=time.time()
         t = t2-t1
