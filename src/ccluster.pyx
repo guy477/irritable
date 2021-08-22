@@ -247,8 +247,11 @@ cdef void get_ehs_fast(int16[:] j, int16[:] twl_tiewinloss) nogil:
 # All major computation is done in C. Only remaining overhead is encountered in the
 # below function. For each of the (legal) C(52, 2) * C(50, 5) combinations that represent all 
 # of hero's hand/table combos we make C(45, 2) comparisons with the other legal villian hands.
-# The cumulative runtime exists somewhere between O(C(52, 7) * C(45, 2)) and O(C(52, 2) * C(52, 5) * C(45, 2))
-# Will formally calculate at another time. ~ it go fast ~
+# The cumulative comparisons done is somewhere between (C(52, 7) * C(45, 2)) and 
+# (C(52, 2) * C(52, 5) * C(45, 2)). Most of the current optimizations come in the way of
+# memory management (minimizing reads/writes to existing/new locations).
+# 
+# Will formally calculate another time... ~ it go fast ~ but it can go a good bit faster.
 # 
 
 # @cython.profile(True)
