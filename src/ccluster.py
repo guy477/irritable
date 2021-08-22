@@ -34,7 +34,7 @@ save = []
 
 with concurrent.futures.ProcessPoolExecutor() as executor:
     # change crnt to appropriate number of workers for your system
-    crnt = (64)
+    crnt = (8)
     futures = []
     chunksize = len(x) // crnt
     

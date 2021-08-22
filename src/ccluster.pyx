@@ -2,18 +2,22 @@ import time
 import numpy
 import random
 
-
-
 cimport numpy
 cimport cython
 from libc.stdio cimport FILE, fopen, fwrite, fscanf, fclose, fprintf
 
+# cython: profile=True
+
 ctypedef numpy.uint8_t uint8
 ctypedef numpy.int16_t int16
 ctypedef numpy.npy_bool boolean
+
+
 #################################################################################################
 # The below code is taken from eval7 - https://pypi.org/project/eval7/
 #################################################################################################
+
+
 cdef extern from "arrays.h":
     unsigned short N_BITS_TABLE[8192]
     unsigned short STRAIGHT_TABLE[8192]
@@ -46,6 +50,7 @@ cdef unsigned int HANDTYPE_VALUE_TWOPAIR = ((<unsigned int>2) << HANDTYPE_SHIFT)
 cdef unsigned int HANDTYPE_VALUE_PAIR = ((<unsigned int>1) << HANDTYPE_SHIFT)
 cdef unsigned int HANDTYPE_VALUE_HIGHCARD = ((<unsigned int>0) << HANDTYPE_SHIFT)
 
+#@cython.profile(True)
 @cython.boundscheck(False) 
 @cython.wraparound(False)
 cdef unsigned int cy_evaluate(unsigned long long cards, unsigned int num_cards) nogil:
@@ -151,16 +156,6 @@ cdef unsigned int cy_evaluate(unsigned long long cards, unsigned int num_cards) 
             retval += <unsigned int>((TOP_CARD_TABLE[ranks ^ (1U << <int>top) ^ (1 << <int>second)]) << THIRD_CARD_SHIFT)
             return retval
 
-
-@cython.boundscheck(False) 
-@cython.wraparound(False)
-cdef unsigned long long cards_to_mask(int16[:] py_cards) nogil:
-    cdef numpy.ulonglong_t cards = 0
-    for p in range(7):
-        cards |= (<unsigned long long>1) << (py_cards[p])
-    return cards
-
-
 #################################################################################################
 # My code below.
 #################################################################################################
@@ -168,6 +163,8 @@ cdef unsigned long long cards_to_mask(int16[:] py_cards) nogil:
 # 
 # See if a card appears twice in the hand/table combo. Can be faster.
 # 
+
+# @cython.profile(True)
 @cython.boundscheck(False) 
 @cython.wraparound(False)
 cdef numpy.npy_bool contains_duplicates(int16[:] XX) nogil:
@@ -186,6 +183,8 @@ cdef numpy.npy_bool contains_duplicates(int16[:] XX) nogil:
 # 
 # Check if the hand/board combo (XX) contains a given card (comp)
 # 
+
+# @cython.profile(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cdef numpy.npy_bool contains(int16[:] XX, int comp) nogil:
@@ -204,32 +203,38 @@ cdef numpy.npy_bool contains(int16[:] XX, int comp) nogil:
 # This is an exact calculation so I leave the result as an integer ratio 
 # in order to avoid precision loss later down the line.
 #  
+
+# @cython.profile(True)
 @cython.boundscheck(False) 
 @cython.wraparound(False)
-cdef void get_ehs_fast(int16[:] j, int16[:] twl_tiewinloss):
+cdef void get_ehs_fast(int16[:] j, int16[:] twl_tiewinloss) nogil:
     cdef int16 x[45]
     cdef int16 i, k
     cdef int hero, v, c
-
+    cdef unsigned long long mask = 0
     cdef unsigned int seven = 7
+    cdef unsigned long long one = 1
 
-    twl_tiewinloss[0] = 0
-    twl_tiewinloss[1] = 0
-    twl_tiewinloss[2] = 0
     
     c = 0
     for i in range(52):
         if not contains(j, i):
             x[c] = i
-            c += 1
+            c += 1    
 
-    hero = cy_evaluate(cards_to_mask(j), seven)
+    mask |= one << j[2]
+    mask |= one << j[3]
+    mask |= one << j[4]
+    mask |= one << j[5]
+    mask |= one << j[6]
+
+    hero = cy_evaluate(one << j[0] | one << j[1] | mask, seven)
 
     for i in range(0, 45-1):
         for k in range(i+1, 45):
-            j[0] = x[i]
-            j[1] = x[k]
-            v = cy_evaluate(cards_to_mask(j), seven)
+
+            v = cy_evaluate(one << x[i] | one << x[k] | mask, seven)
+
             if(hero > v):
                 twl_tiewinloss[1] += 1
             elif(v > hero):
@@ -237,16 +242,16 @@ cdef void get_ehs_fast(int16[:] j, int16[:] twl_tiewinloss):
             else:
                 twl_tiewinloss[0] += 1
     
-    #return twl_tiewinloss
-
 
 # 
 # All major computation is done in C. Only remaining overhead is encountered in the
 # below function. For each of the (legal) C(52, 2) * C(50, 5) combinations that represent all 
 # of hero's hand/table combos we make C(45, 2) comparisons with the other legal villian hands.
 # The cumulative runtime exists somewhere between O(C(52, 7) * C(45, 2)) and O(C(52, 2) * C(52, 5) * C(45, 2))
-# Will formally calculate at another time. ~it go fast~
+# Will formally calculate at another time. ~ it go fast ~
 # 
+
+# @cython.profile(True)
 @cython.boundscheck(False) 
 @cython.wraparound(False)
 cpdef do_calc(int16[:, :] x, int16[:, :] y, int id):
@@ -255,6 +260,9 @@ cpdef do_calc(int16[:, :] x, int16[:, :] y, int id):
     cdef double t1, t2, t
     cdef numpy.int64_t x_shape = x.shape[0]
     cdef numpy.int64_t y_shape = y.shape[0]
+
+    print(x.shape)
+    print(y.shape)
     
     
     c = 0
