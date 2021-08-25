@@ -1,6 +1,7 @@
 import time
 import numpy
 import random
+import concurrent.futures
 
 cimport numpy
 cimport cython
@@ -239,6 +240,22 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
 #################################################################################################
 # My code below.
 #################################################################################################
+#
+# Taken from stack overflow. Fast list combination generator for C(n, k)
+#
+
+def nump2(n, k):
+    a = numpy.ones((k, n-k+1), dtype=numpy.int16)
+    a[0] = numpy.arange(n-k+1)
+    for j in range(1, k):
+        reps = (n-k+j) - a[j-1]
+        a = numpy.repeat(a, reps, axis=1)
+        ind = numpy.add.accumulate(reps)
+        a[j, ind[:-1]] = 1-reps[1:]
+        a[j, 0] = j
+        a[j] = numpy.add.accumulate(a[j])
+    return a.T
+
 
 # 
 # See if a card appears twice in the hand/table combo. Can be faster.
@@ -337,7 +354,7 @@ cdef void get_ehs_fast(int16[:] j, int16[:] twl_tiewinloss) nogil:
 # @cython.profile(True)
 @cython.boundscheck(False) 
 @cython.wraparound(False)
-def do_calc(int16[:, :] x, int16[:, :] y, int id):
+def do_calc(numpy.int64_t os, int16[:, :] x, int16[:, :] y, int id):
     cdef unsigned long long int total = 0
     cdef numpy.int64_t i, j, c
     cdef double t1, t2, t
@@ -345,11 +362,15 @@ def do_calc(int16[:, :] x, int16[:, :] y, int id):
     cdef numpy.int64_t y_shape = y.shape[0]
     
     c = 0
+
     
-    cdef numpy.ndarray[int16, ndim=2] z = numpy.empty((x_shape * y_shape, x.shape[1] + y.shape[1] + 3), dtype=numpy.int16)
-    cdef int16 [:, :] z_view = z
+    # cdef numpy.ndarray[int16, ndim=2] z = numpy.empty((x_shape * y_shape, x.shape[1] + y.shape[1] + 3), dtype=numpy.int16)
+    z_memmap = numpy.memmap('results/river.npy', mode = 'r+', dtype = numpy.int16, shape = (x_shape * y_shape, x.shape[1] + y.shape[1] + 3), offset = os)
+    cdef int16 [:, :] z_view = z_memmap[:]
     cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(7, dtype=numpy.int16)
     cdef int16 [:] oh_view = oh
+
+
     for i in range(x_shape):
         t1=time.time()
         for j in range(y_shape):
@@ -364,14 +385,30 @@ def do_calc(int16[:, :] x, int16[:, :] y, int id):
         print('~' + str(t*(x_shape - i)//60) + ' minutes until finished. ' + str(100*(i/x_shape))[:4] + '% done     ', end = '\r')
     
 
-    # save as memmap file for more flexable access later on
-    # NVM WE NEED TO DO THAT LATER. Repeated hang ups while dumping to memory.
-    # might not have even been the code.  
-    # # xyz = numpy.memmap('results/zfin0-'+str(id)+'.npy', mode = 'w+', dtype = numpy.int16, shape = (y.shape[0]*x.shape[0], y.shape[1]+x.shape[1]+3))
-    # # xyz[:] = z_view[:]
-    # # xyz.flush()
-    
-    
-    numpy.save('results/zfin-'+str(id), numpy.asarray(z_view))
+
+@cython.boundscheck(False) 
+@cython.wraparound(False)
+def river_ehs(n, k, threads, new_file=False):
+    x = nump2(n, 2)
+    y = nump2(n, k)
+
+    if(new_file):
+        z = numpy.memmap('results/river.npy', mode = 'w+', dtype = numpy.int16, shape = (y.shape[0] * x.shape[0], y.shape[1] + x.shape[1] + 3))
+        z.flush()
+
+    chunksize = len(x) // threads
+
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        # change threads to appropriate number of workers for your system
+        futures = []
+        for i in range(threads):
+            
+            strt = i * chunksize
+            stp = ((i + 1) * chunksize) if i != (threads - 1) else len(x)
+            
+            futures.append(executor.submit(do_calc, strt * y.shape[0] * 10, x[strt:stp], y, i))
+        concurrent.futures.wait(futures)
+
+        output = [f.result() for f in futures]
 
     

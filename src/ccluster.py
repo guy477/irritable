@@ -1,101 +1,61 @@
 import ccluster
 import numpy as np
-import concurrent.futures
-from sklearn.cluster import MiniBatchKMeans
+from math import comb
+from random import randint
+import kmeans
 
-# 
 
-def nump2(n, k):
-    a = np.ones((k, n-k+1), dtype=np.int16)
-    a[0] = np.arange(n-k+1)
-    for j in range(1, k):
-        reps = (n-k+j) - a[j-1]
-        a = np.repeat(a, reps, axis=1)
-        ind = np.add.accumulate(reps)
-        a[j, ind[:-1]] = 1-reps[1:]
-        a[j, 0] = j
-        a[j] = np.add.accumulate(a[j])
-    return a.T
-
+# This is only accurate for k = 5; n = 52. All other combinations should be used solely for testing
+# unless you know what you're doing.
 k = 5
-n = 52
-# n = 15
+n = 20
 
-dat_y = nump2(n, k)
-
-x = nump2(n, 2)
+# Enter the number of threads for you system
+threads = 8
 
 
-# y = np.memmap('/media/poker_raw/river.npy', mode = 'w+', dtype = np.uint8, shape = (dat_y.shape[0],5))
-# y[:] = dat_y[:]
-# y.flush()
-
-crnt = (16)
-chunksize = len(x) // crnt
-save = list(range(crnt))
-
-# with concurrent.futures.ProcessPoolExecutor() as executor:
-#     # change crnt to appropriate number of workers for your system
-#     futures = []
-#     for i in range(crnt):
-        
-#         strt = i * chunksize
-#         stp = ((i + 1) * chunksize) if i != (crnt - 1) else len(x)
-        
-#         futures.append(executor.submit(ccluster.do_calc, x[strt:stp], dat_y, i))
-#     concurrent.futures.wait(futures)
-
-#     output = [f.result() for f in futures]
+# If this is your first time running, make sure new_file is set to true.
+# This has only been tested on linux systems.
+# Be sure your 'results/' directory has > 70G
+# and that you have either 128G ram or 100G+ swap.
 
 
-# print(ccluster.do_calc(x, dat_y, 69420))
+# Unless you're running this program on an excess of 32 threads, using swap
+# memory off an SSD should not be a bottleneck for this part of the program.
+# OS LIMITATIONS MIGHT CAUSE BOTTLENECKS WHEN DUMPING TO AN EXTERNAL SDD/HDD
+# BE SURE TO RUN THE PROGRAM FROM THE SAME DRIVE THAT CONTAINS YOUR EXTENDED
+# SWAP MEMORY. IF YOU HAVE ENOUGH RAM, DONT WORRY BOUT IT.
+ccluster.river_ehs(n, k, threads, new_file = True)
 
+
+
+#                      Load a memory mapping of the river scores.
+
+z = np.memmap('results/river.npy', mode = 'r', dtype = np.int16, shape = (comb(n, 2) * comb(n, k), 2 + 5 + 3))
+
+
+
+#            Code snippet to continually print a prettified output of all legal hands
+#########################################################################################################
 ranks = ('2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A')
 suits = ('c', 'd', 'h', 's')
+for i in range(z.shape[0]):
+    if(z[i][0] != z[i][1]):
+        for j in range(7):
+            print(ranks[z[i][j]%13] + suits[z[i][j]//13], end = ' ')
+        print(z[i][7:])
+#########################################################################################################
 
-for i in range(crnt):
-    strt = i * chunksize
-    stp = ((i + 1) * chunksize) if i != (crnt - 1) else len(x)
-    
-    # pylint: disable=unexpected-keyword-arg
-    save[i] = (i, np.load("results/zfin-" + str(i) + ".npy", mmap_mode='r'))
+kmeans.test_cykmeans()
 
+cntrs = kmeans.centers(z[...,7:8], 200)
+labels = kmeans.assign(z[...,7:8], cntrs)
+clusters = kmeans.cluster(z[...,7:8], cntrs)
 
-for i in save:
-    print(i[1])
+print(cntrs)
+print(clusters)
+print(labels)
 
-#print(tmp[:, 7:].shape)
-# seeding = ccluster.kmc2(tmp[:, 7:], 2000)
-#print(seeding)
-#model = MiniBatchKMeans(2000, init=seeding).fit(tmp[:, 7:])
-#print(model.cluster_centers_)
-
-
-
-# for i in save:
-#     mat = np.load('results/zfin-'+str(i)+'.npy')
-#     c = 0
-#     ind = 0
-#     while c < 100:
-#         if (mat[ind][0] != mat[ind][1]):
-#             for j in range(10):
-#                 print(mat[ind][j], end = ' ')
-#                 c += 1
-#             print()
-#         ind += 1
-#     c = 0
-#     ind = 1
-#     while c < 100:
-#         if (mat[-ind][0] != mat[-ind][1]):
-#             for j in range(10):
-#                 print(mat[-ind][j], end = ' ')
-#                 c += 1
-#             print()
-#         ind += 1
-#     print()
-#     print()
-#
-# for i in range(52):
-#     print(str(i) + ' - ' + ranks[i%13]+suits[i//13])
-
-# print(ccluster.do_calc(1, 45, 6))
+print(cntrs.shape)
+print(len(clusters))
+print(labels.shape)

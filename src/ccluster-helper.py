@@ -8,3 +8,8 @@ setup(
     ext_modules = cythonize("ccluster.pyx"),
     include_dirs=[numpy.get_include()]
 )
+
+setup(
+    ext_modules = cythonize("cykmeans.pyx"),
+    include_dirs=[numpy.get_include()]
+)
