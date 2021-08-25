@@ -54,7 +54,7 @@ def _assigner_factory(alg, data, cntrs):
 
 
 def _lloyd_assigner(data, cntrs):
-    data = np.require(data, np.float64, 'C')
+    #data = np.require(data, np.float64, 'C')
     dists = np.zeros((len(data), len(cntrs)))
     def lloyd(cntrs):
         d = cykmeans._sq_distances(data, cntrs, dists)

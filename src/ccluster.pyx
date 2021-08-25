@@ -16,6 +16,7 @@ from sklearn.utils import check_array
 
 ctypedef numpy.uint8_t uint8
 ctypedef numpy.int16_t int16
+ctypedef numpy.int64_t int64
 ctypedef numpy.npy_bool boolean
 
 
@@ -388,6 +389,67 @@ def do_calc(numpy.int64_t os, int16[:, :] x, int16[:, :] y, int id):
 
 @cython.boundscheck(False) 
 @cython.wraparound(False)
+cpdef de_dupe_c(int64 strt,int64 x_shape0,int64 y_shape0,int64 ndupes):
+    z_mm = numpy.memmap('results/river.npy', mode = 'r+', dtype = numpy.int16, shape = (x_shape0 * y_shape0, 10))
+    ND_mm = numpy.memmap('results/no_dupe_river.npy', mode = 'r+', dtype = numpy.float64, shape = (x_shape0 * (y_shape0-ndupes), 1))
+    cdef int16 [:, :] z_view = z_mm[:]
+    cdef numpy.float64_t [:, :] nd_view = ND_mm[:]
+
+    cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(10, dtype=numpy.int16)
+    cdef int16[:] oh_view = oh[:]
+
+    cdef int64 c = 0
+    cdef int64 cd = 0
+    for i in range(x_shape0):
+        for j in range(y_shape0):
+            oh_view[:] = z_view[cd][:]
+            if(oh_view[0] != oh_view[1]):
+                nd_view[c*4][:] = (oh_view[8]+.5*oh_view[7]) / (oh_view[8]+oh_view[7]+oh_view[9])
+                c += 1
+            cd += 1
+            
+
+        
+    
+
+#
+# If you want to change the metric off which you cluster, this is the function to do that in.
+# Just change z to have the correct number of dimensions
+#
+@cython.boundscheck(False) 
+@cython.wraparound(False)
+def de_dupe(ndupes, x_shape0, y_shape0,new_file = False):
+    if(new_file):
+        z = numpy.memmap('results/no_dupe_river.npy', mode = 'w+', dtype = numpy.float64, shape = (x_shape0 * (y_shape0 - ndupes), 1))
+        z.flush()
+
+    
+    # single thread copying seems faster anyways.
+    de_dupe_c(0, x_shape0, y_shape0, ndupes)
+
+
+    #chunksize = x_shape0 // (threads-1)
+
+    ###                      does not work --- issues with getting setting the right float64 memmap offset
+    # with concurrent.futures.ProcessPoolExecutor() as executor:
+    #     # change threads to appropriate number of workers for your system
+    #     futures = []
+    #     for i in range(threads-1):
+            
+    #         strt = i * chunksize
+    #         stp = ((i + 1) * chunksize) if i != (threads - 2) else x_shape0
+            
+    #         futures.append(executor.submit(de_dupe_c, strt, stp-strt, y_shape0, ndupes))
+    #     concurrent.futures.wait(futures)
+
+    #     output = [f.result() for f in futures]
+        
+    
+
+
+
+@cython.boundscheck(False) 
+@cython.wraparound(False)
 def river_ehs(n, k, threads, new_file=False):
     x = nump2(n, 2)
     y = nump2(n, k)
@@ -396,15 +458,15 @@ def river_ehs(n, k, threads, new_file=False):
         z = numpy.memmap('results/river.npy', mode = 'w+', dtype = numpy.int16, shape = (y.shape[0] * x.shape[0], y.shape[1] + x.shape[1] + 3))
         z.flush()
 
-    chunksize = len(x) // threads
+    chunksize = len(x) // (threads-1)
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
         # change threads to appropriate number of workers for your system
         futures = []
-        for i in range(threads):
+        for i in range(threads-1):
             
             strt = i * chunksize
-            stp = ((i + 1) * chunksize) if i != (threads - 1) else len(x)
+            stp = ((i + 1) * chunksize) if i != (threads - 2) else len(x)
             
             futures.append(executor.submit(do_calc, strt * y.shape[0] * 10, x[strt:stp], y, i))
         concurrent.futures.wait(futures)
