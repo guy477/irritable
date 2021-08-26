@@ -8,7 +8,7 @@ import numpy as np
 from math import comb
 from random import randint
 # from sklearn.cluster import MiniBatchKMeans
-from pyemma.coordinates.clustering import MiniBatchKmeansClustering
+from pyemma.coordinates.clustering import KmeansClustering
 
 
 
@@ -88,7 +88,8 @@ zND = np.memmap('results/no_dupe_river.npy', mode = 'r', dtype = np.float32, sha
 #           Memmapped K-Means clustering algorithm. Not yet successful w/full dataset.
 #########################################################################################################
 
-k = MiniBatchKmeansClustering(n_clusters=200, max_iter=200, batch_size = 1/threads).fit(zND)
+# k = MiniBatchKmeansClustering(n_clusters=200, max_iter=200, batch_size = 1/threads).fit(zND)
+k = KmeansClustering(n_clusters=200, max_iter=250, tolerance=1e-4, stride=2).fit(zND)
 lbls = k.get_output()
 np.save('results/cntrs', lbls[0])
 
