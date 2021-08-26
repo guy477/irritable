@@ -391,9 +391,9 @@ def do_calc(numpy.int64_t os, int16[:, :] x, int16[:, :] y, int id):
 @cython.wraparound(False)
 cpdef de_dupe_c(int64 strt,int64 x_shape0,int64 y_shape0,int64 ndupes):
     z_mm = numpy.memmap('results/river.npy', mode = 'r+', dtype = numpy.int16, shape = (x_shape0 * y_shape0, 10))
-    ND_mm = numpy.memmap('results/no_dupe_river.npy', mode = 'r+', dtype = numpy.float64, shape = (x_shape0 * (y_shape0-ndupes), 1))
+    ND_mm = numpy.memmap('results/no_dupe_river.npy', mode = 'r+', dtype = numpy.float32, shape = (x_shape0 * (y_shape0-ndupes), 1))
     cdef int16 [:, :] z_view = z_mm[:]
-    cdef numpy.float64_t [:, :] nd_view = ND_mm[:]
+    cdef numpy.float32_t [:, :] nd_view = ND_mm[:]
 
     cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(10, dtype=numpy.int16)
     cdef int16[:] oh_view = oh[:]
@@ -404,7 +404,7 @@ cpdef de_dupe_c(int64 strt,int64 x_shape0,int64 y_shape0,int64 ndupes):
         for j in range(y_shape0):
             oh_view[:] = z_view[cd][:]
             if(oh_view[0] != oh_view[1]):
-                nd_view[c*4][:] = (oh_view[8]+.5*oh_view[7]) / (oh_view[8]+oh_view[7]+oh_view[9])
+                nd_view[c][:] = (oh_view[8]+.5*oh_view[7]) / (oh_view[8]+oh_view[7]+oh_view[9])
                 c += 1
             cd += 1
             
@@ -420,7 +420,7 @@ cpdef de_dupe_c(int64 strt,int64 x_shape0,int64 y_shape0,int64 ndupes):
 @cython.wraparound(False)
 def de_dupe(ndupes, x_shape0, y_shape0,new_file = False):
     if(new_file):
-        z = numpy.memmap('results/no_dupe_river.npy', mode = 'w+', dtype = numpy.float64, shape = (x_shape0 * (y_shape0 - ndupes), 1))
+        z = numpy.memmap('results/no_dupe_river.npy', mode = 'w+', dtype = numpy.float32, shape = (x_shape0 * (y_shape0 - ndupes), 1))
         z.flush()
 
     
@@ -430,7 +430,7 @@ def de_dupe(ndupes, x_shape0, y_shape0,new_file = False):
 
     #chunksize = x_shape0 // (threads-1)
 
-    ###                      does not work --- issues with getting setting the right float64 memmap offset
+    ###                      does not work --- issues with getting setting the right float32 memmap offset
     # with concurrent.futures.ProcessPoolExecutor() as executor:
     #     # change threads to appropriate number of workers for your system
     #     futures = []

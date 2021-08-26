@@ -10,7 +10,7 @@ def centers(data, k, iters=20, reps=1, alg='lloyd'):
     data = np.require(data, np.float64, 'C')
     best = float('inf')
     best_cntrs = None
-    for r in range(reps):
+    for _ in range(reps):
         cntrs = _init(data, k)
         assigner = _assigner_factory(alg, data, cntrs)
         c = _kmeans(data, k, cntrs, assigner, iters)    # candidate centers
@@ -91,7 +91,7 @@ def _kmeans(data, k, cntrs, assigner, iters=20):
     n = float(len(data))
     prev_a = None
     valid = np.zeros(k, dtype=np.int64)
-    for i in range(iters):
+    for _ in range(iters):
         a = assigner(cntrs)
         cykmeans._adjust_centers(data, cntrs, a, valid)
         # stop updating the centers if less than 1% of the points have changed clusters
@@ -100,45 +100,4 @@ def _kmeans(data, k, cntrs, assigner, iters=20):
             break
         prev_a = a.copy()
     return cntrs[valid>=1]
-
-
-
-def test_cykmeans():
-    cykmeans.test_sq_distances()
-    cykmeans.test_adjust_centers()
-
-def test_kmeans():
-    data = np.random.rand(500, 2)
-    cntrs = centers(data, 10)
-    labels = assign(data, cntrs)
-    clusters = cluster(data, cntrs)
-
-def test_elkan():
-    import time
-    n = 500
-    k = 10
-    data = np.random.rand(n, 2)
-    seed = np.random.randint(5000000)
-    # Run Lloyd's algorithm
-    np.random.seed(seed)
-    start = time.time()
-    c1 = centers(data, k, alg='lloyd')
-    t1 = time.time() - start
-    l1 = assign(data, c1)
-    u1 = cluster(data, c1)
-    # Run Elkan's algorithm
-    np.random.seed(seed)
-    start = time.time()
-    c2 = centers(data, k, alg='elkan')
-    t2 = time.time() - start
-    l2 = assign(data, c2)
-    u2 = cluster(data, c2)
-    # Check that the results are the same
-    if np.any(c1 != c2):
-        print('c1', c1)
-        print('c2', c2)
-    assert np.all( c1 == c2 )
-    assert np.all( l1 == l2 )
-    assert all( [np.all( e1 == e2 ) for e1, e2 in zip(u1, u2)] )
-
 
