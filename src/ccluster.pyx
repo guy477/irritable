@@ -185,8 +185,7 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
     cdef numpy.intp_t j, curr_ind
     cdef double cand_prob, curr_prob
     cdef double[::1] q_cand, p_cand, rand_a
-    curr_prob = 0
-    cand_prob = 0
+
     # Handle input
     X = check_array(X, accept_sparse="csr", dtype=numpy.float64, order="C")    
     sparse = not isinstance(X, numpy.ndarray)
@@ -203,7 +202,10 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
     rel_row = X[random_state.choice(X.shape[0], p=weights/weights.sum()), :]
     centers[0, :] = rel_row.todense().flatten() if sparse else rel_row
     if afkmc2:
-        di = numpy.min(euclidean_distances(X, centers[0:1, :], squared=True), axis=1)*weights
+        if(X.shape[1] == 1):
+            di = numpy.reshape(euclidean_distances(X, centers[0:1, :], squared = True), newshape = (X.shape[0]))
+        else:
+            di = numpy.min(euclidean_distances(X, centers[0:1, :], squared=True), axis=1)*weights
         q = di/numpy.sum(di) + weights/numpy.sum(weights)  # Only the potentials
     else:
         q = numpy.copy(weights)
@@ -211,6 +213,7 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
     q = q / numpy.sum(q)
 
     for i in range(k-1):
+        t1 = time.time()
         # Draw the candidate indices
         cand_ind = random_state.choice(X.shape[0], size=(chain_length), p=q).astype(numpy.intp)
         # Extract the proposal probabilities
@@ -223,17 +226,19 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
         rand_a = random_state.random_sample(size=(chain_length))
         with nogil, cython.boundscheck(False), cython.wraparound(False), cython.cdivision(True):
             # Markov chain
-            
             for j in range(q_cand.shape[0]):
-                
                 cand_prob = p_cand[j]/q_cand[j]
-
                 if j == 0 or curr_prob == 0.0 or cand_prob/curr_prob > rand_a[j]:
                     # Init new chain             Metropolis-Hastings step
                     curr_ind = j
                     curr_prob = cand_prob
         rel_row = X[cand_ind[curr_ind], :]
         centers[i+1, :] = rel_row.todense().flatten() if sparse else rel_row
+
+        t2 = time.time()
+        t = t2 - t1
+        print('~' + str(t * (k - 1 - i)//60) + " minutes until completion. " + str(100 * (i / (k - 1)))[:4] + "% done", end = '\r')
+    print()
     return centers
 
 
@@ -362,16 +367,15 @@ def do_calc(numpy.int64_t os, int16[:, :] x, int16[:, :] y, int id):
     cdef numpy.int64_t x_shape = x.shape[0]
     cdef numpy.int64_t y_shape = y.shape[0]
     
-    c = 0
-
     
-    # cdef numpy.ndarray[int16, ndim=2] z = numpy.empty((x_shape * y_shape, x.shape[1] + y.shape[1] + 3), dtype=numpy.int16)
+
     z_memmap = numpy.memmap('results/river.npy', mode = 'r+', dtype = numpy.int16, shape = (x_shape * y_shape, x.shape[1] + y.shape[1] + 3), offset = os)
     cdef int16 [:, :] z_view = z_memmap[:]
     cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(7, dtype=numpy.int16)
     cdef int16 [:] oh_view = oh
 
 
+    c = 0
     for i in range(x_shape):
         t1=time.time()
         for j in range(y_shape):
@@ -386,14 +390,19 @@ def do_calc(numpy.int64_t os, int16[:, :] x, int16[:, :] y, int id):
         print('~' + str(t*(x_shape - i)//60) + ' minutes until finished. ' + str(100*(i/x_shape))[:4] + '% done     ', end = '\r')
     
 
+# 
+# 
+# De Dupe Da Dataset
+# 
+# 
 
 @cython.boundscheck(False) 
 @cython.wraparound(False)
-cpdef de_dupe_c(int64 strt,int64 x_shape0,int64 y_shape0,int64 ndupes):
+cpdef de_dupe_cp(int64 strt,int64 x_shape0,int64 y_shape0,int64 ndupes):
     z_mm = numpy.memmap('results/river.npy', mode = 'r+', dtype = numpy.int16, shape = (x_shape0 * y_shape0, 10))
-    ND_mm = numpy.memmap('results/no_dupe_river.npy', mode = 'r+', dtype = numpy.float32, shape = (x_shape0 * (y_shape0-ndupes), 1))
+    ND_mm = numpy.memmap('results/no_dupe_river.npy', mode = 'r+', dtype = numpy.float64, shape = (x_shape0 * (y_shape0-ndupes), 1))
     cdef int16 [:, :] z_view = z_mm[:]
-    cdef numpy.float32_t [:, :] nd_view = ND_mm[:]
+    cdef numpy.float64_t [:, :] nd_view = ND_mm[:]
 
     cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(10, dtype=numpy.int16)
     cdef int16[:] oh_view = oh[:]
@@ -420,29 +429,10 @@ cpdef de_dupe_c(int64 strt,int64 x_shape0,int64 y_shape0,int64 ndupes):
 @cython.wraparound(False)
 def de_dupe(ndupes, x_shape0, y_shape0,new_file = False):
     if(new_file):
-        z = numpy.memmap('results/no_dupe_river.npy', mode = 'w+', dtype = numpy.float32, shape = (x_shape0 * (y_shape0 - ndupes), 1))
+        z = numpy.memmap('results/no_dupe_river.npy', mode = 'w+', dtype = numpy.float64, shape = (x_shape0 * (y_shape0 - ndupes), 1))
         z.flush()
 
-    
-    # single thread copying seems faster anyways.
-    de_dupe_c(0, x_shape0, y_shape0, ndupes)
-
-
-    #chunksize = x_shape0 // (threads-1)
-
-    ###                      does not work --- issues with getting setting the right float32 memmap offset
-    # with concurrent.futures.ProcessPoolExecutor() as executor:
-    #     # change threads to appropriate number of workers for your system
-    #     futures = []
-    #     for i in range(threads-1):
-            
-    #         strt = i * chunksize
-    #         stp = ((i + 1) * chunksize) if i != (threads - 2) else x_shape0
-            
-    #         futures.append(executor.submit(de_dupe_c, strt, stp-strt, y_shape0, ndupes))
-    #     concurrent.futures.wait(futures)
-
-    #     output = [f.result() for f in futures]
+    de_dupe_cp(0, x_shape0, y_shape0, ndupes)
         
     
 
@@ -461,14 +451,13 @@ def river_ehs(n, k, threads, new_file=False):
     chunksize = len(x) // (threads-1)
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        # change threads to appropriate number of workers for your system
         futures = []
         for i in range(threads-1):
             
             strt = i * chunksize
             stp = ((i + 1) * chunksize) if i != (threads - 2) else len(x)
             
-            futures.append(executor.submit(do_calc, strt * y.shape[0] * 10, x[strt:stp], y, i))
+            futures.append(executor.submit(do_calc, strt * y.shape[0] * 10 * 2, x[strt:stp], y, i))
         concurrent.futures.wait(futures)
 
         output = [f.result() for f in futures]
