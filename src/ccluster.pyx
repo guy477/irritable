@@ -15,6 +15,7 @@ from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.utils import check_array
 
 ctypedef numpy.uint8_t uint8
+ctypedef numpy.uint16_t uint16
 ctypedef numpy.int16_t int16
 ctypedef numpy.int64_t int64
 ctypedef numpy.npy_bool boolean

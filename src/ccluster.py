@@ -1,27 +1,22 @@
 
 import ccluster
-import kmeans
 import time
-
 import numpy as np
-
 from math import comb
-from random import randint
 from sklearn.cluster import KMeans
-
 
 
 
 # This is only accurate for k = 5; n = 52. All other combinations should be used solely for testing
 # unless you know what you're doing.
 k = 5
-n = 20
+n = 52
 
 # Enter the number of threads for you system
 threads = 8
 
 # Would you like to precompute the centroids? Recommended.
-precompute = True
+precompute = False
 
 # If this is your first time running, make sure new_file is set to true.
 # This has only been tested on linux systems.
@@ -55,10 +50,10 @@ suits = ('c', 'd', 'h', 's')
 dupe = 0
 for i in range(comb(n, k)):
     if(z[i][0] != z[i][1]):
-        print(z[i])
-        for j in range(7):
-            print(ranks[z[i][j]%13] + suits[z[i][j]//13], end = ' ')
-        print(z[i][7:])
+        # print(z[i])
+        # for j in range(7):
+        #     print(ranks[z[i][j]%13] + suits[z[i][j]//13], end = ' ')
+        # print(z[i][7:])
         continue
     else:
         dupe += 1
@@ -74,14 +69,14 @@ ccluster.de_dupe(dupe, comb(n, 2), comb(n, 5), new_file = True)
 zND = np.memmap('results/no_dupe_river.npy', mode = 'r', dtype = np.float64, shape = (comb(n, 2) * (comb(n, k) - dupe), 1))
 
 
-c=-1
-for i in range(z.shape[0] - 1, z.shape[0] - comb(n, k), -1):
-    if(z[i][0] != z[i][1]):
-        for j in range(7):
-            print(ranks[z[i][j]%13] + suits[z[i][j]//13], end = ' ')
-        print(z[i][7:], end = ' - ')
-        print(zND[c])
-        c -= 1
+# c=-1
+# for i in range(z.shape[0] - 1, z.shape[0] - comb(n, k), -1):
+#     if(z[i][0] != z[i][1]):
+#         for j in range(7):
+#             print(ranks[z[i][j]%13] + suits[z[i][j]//13], end = ' ')
+#         print(z[i][7:], end = ' - ')
+#         print(zND[c])
+#         c -= 1
 
 
 
@@ -98,7 +93,28 @@ else:
     centers = None
 
 
-k = KMeans(200, algorithm='full', init = centers, verbose=True, n_init=1).fit_predict(zND)
-np.save('results/cntrs', k)
-print(k)
+kmean = KMeans(200, algorithm='full', init = centers, verbose=True, n_init=1).fit_predict(zND)
+np.save('results/clstrs', kmean)
+
+# kmean = np.load('results/clstrs.npy', mmap_mode = 'r')
+
+# print(kmean)
+# dupe = 0 
+# for i in range(comb(n, k)):
+#     if(z[i][0] != z[i][1]):
+#         # print(z[i])
+#         for j in range(7):
+#             print(ranks[z[i][j]%13] + suits[z[i][j]//13], end = ' ')
+#         print(str(z[i][7:]) + str(kmean[i - dupe]))
+
+#     else:
+#         dupe += 1
+
+
+#########################################################################################################
+#                                      Flop and Turn EHS Datasets
+#########################################################################################################
+
+# turn data set will be a C(52, 2) * C(52, 4) np.uint16 dataset. Potential 990*47 overhead w/royalflush on turn: flop will be 990*47*46 - justifying np.int32 for the flop.
+# flop and turn will be calculated based on the river with exact calculations.
 
