@@ -1,3 +1,5 @@
+#!python
+#cython: language_level=3
 import time
 import numpy
 import random
