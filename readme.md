@@ -21,8 +21,10 @@ Python dense areas will he highlighted yellow.
 Generates a (semi-sparce) 67+ gb numpy matrix of the following format:
 (hcrd = hand card; tcrd = table card)
 
+```
 hcrd1|hcrd2|tcrd1|tcrd2|tcrd3|tcrd4|tcrd5|tie #|win #|loss#
 int16|int16|int16|int16|int16|int16|int16|int16|int16|int16
+```
 
 Elements of the above matrix can be accessed using two mappings. One maps your hand to a particular chunk. The other maps the board to an index within the chunk. This scales and will be more intuitive when you see it. Point being that accessing an element most nearly O(1)...
 
@@ -30,6 +32,7 @@ Essentially, (this may not be completely accurate, but conceptually equivalent) 
 
 // comments are not part of dataset...
 
+```
 hcrd1|hcrd2|tcrd1|tcrd2|tcrd3|tcrd4|tcrd5|tie #|win #|loss#
 0    |0    |0    |0    |0    |0    |0    |###  |###  |### // BEGINNING OF 'CHUNK' 0
 0    |0    |1    |0    |0    |0    |0    |###  |###  |###
@@ -41,6 +44,7 @@ hcrd1|hcrd2|tcrd1|tcrd2|tcrd3|tcrd4|tcrd5|tie #|win #|loss#
 1    |0    |1    |0    |0    |0    |0    |###  |###  |###
 1    |0    |2    |0    |0    |0    |0    |###  |###  |###
 ... ... ...
+```
 
 using this memory representation of hands you can construct lables for the cluster a particular hand falls under and access it remarkably fast (if you have enough RAM to hold the entire dataset without using SWAP).
 
