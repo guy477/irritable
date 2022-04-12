@@ -1,5 +1,9 @@
 #!python
 #cython: language_level=3
+# -*- coding: utf-8 -*-
+# distutils: language = c++
+# emd.pyx
+
 import time
 import numpy
 import random
@@ -11,13 +15,15 @@ cimport cython
 from cython.parallel import prange
 
 
+from libcpp.map cimport map
+
 from libc.stdio cimport FILE, fopen, fwrite, fscanf, fclose, fprintf
 # cython: profile=True
 from sklearn.metrics.pairwise import euclidean_distances
+from scipy.spatial.distance import pdist, squareform
 from sklearn.utils import check_array
 
 ctypedef numpy.uint8_t uint8
-ctypedef numpy.uint16_t uint16
 ctypedef numpy.int16_t int16
 ctypedef numpy.int64_t int64
 ctypedef numpy.npy_bool boolean
@@ -199,16 +205,21 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
     if not isinstance(random_state, numpy.random.RandomState):
         raise ValueError("RandomState should either be a numpy.random.RandomState"
                          " instance, None or an integer to be used as seed.")
+
     # Initialize result
     centers = numpy.zeros((k, X.shape[1]), numpy.float64, order="C")
+
     # Sample first center and compute proposal
     rel_row = X[random_state.choice(X.shape[0], p=weights/weights.sum()), :]
     centers[0, :] = rel_row.todense().flatten() if sparse else rel_row
+    
+    # print(list(map(numpy.linalg.norm, (X - centers[0:1, :])**2)))
+    # print(numpy.reshape(euclidean_distances(X, centers[0:1, :], squared = True), newshape = X.shape[0]))
+    # print(numpy.reshape(X, newshape=X.shape[0]))
     if afkmc2:
-        if(X.shape[1] == 1):
-            di = numpy.reshape(euclidean_distances(X, centers[0:1, :], squared = True), newshape = (X.shape[0]))
-        else:
-            di = numpy.min(euclidean_distances(X, centers[0:1, :], squared=True), axis=1)*weights
+        # di = (numpy.array(list(map(numpy.linalg.norm, (X - centers[0:1, :])**2))))*weights
+        # multiplying by weights seems to crash the program..
+        di = numpy.reshape(euclidean_distances(X, centers[0:1, :], squared=True), newshape=(X.shape[0]))
         q = di/numpy.sum(di) + weights/numpy.sum(weights)  # Only the potentials
     else:
         q = numpy.copy(weights)
@@ -237,11 +248,9 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
                     curr_prob = cand_prob
         rel_row = X[cand_ind[curr_ind], :]
         centers[i+1, :] = rel_row.todense().flatten() if sparse else rel_row
-
-        t2 = time.time()
-        t = t2 - t1
-        print('~' + str(t * (k - 1 - i)//60) + " minutes until completion. " + str(100 * (i / (k - 1)))[:4] + "% done", end = '\r')
-    print()
+        t2=time.time()
+        t = t2-t1
+        print('~' + str(t*(k - 1 - i)//60) + ' minutes until finished. ' + str(100*(i/(k-1)))[:4] + '% done     ', end = '\r')
     return centers
 
 
@@ -287,6 +296,25 @@ cdef numpy.npy_bool contains_duplicates(int16[:] XX) nogil:
 
 
 # 
+# See if a card appears twice in the hand/table combo. Can be faster.
+# 
+
+# @cython.profile(True)
+@cython.boundscheck(False) 
+@cython.wraparound(False)
+cdef numpy.npy_bool contains_duplicates_turn(int16[:] XX) nogil:
+    cdef unsigned int count
+    cdef unsigned int length
+    cdef unsigned int countt = 0
+    length = 6
+    for count in range(length):        
+        for countt in range(count+1, length):
+            if(XX[count] == XX[countt]):
+                return True
+        
+    return False
+
+# 
 # Check if the hand/board combo (XX) contains a given card (comp)
 # 
 
@@ -302,6 +330,17 @@ cdef numpy.npy_bool contains(int16[:] XX, int comp) nogil:
         
     return False
 
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef numpy.npy_bool contains_turn(int16[:] XX, int comp) nogil:
+    cdef unsigned int count
+    cdef unsigned int length = 6
+    for count in range(length):
+        if(XX[count] == comp):
+            return True
+        
+    return False
 
 # 
 # Get the Expected Hand Strength for a given hand/board river combination.
@@ -349,6 +388,16 @@ cdef void get_ehs_fast(int16[:] j, int16[:] twl_tiewinloss) nogil:
                 twl_tiewinloss[0] += 1
     
 
+
+
+
+
+# @cython.boundscheck(False) 
+# @cython.wraparound(False)
+# cdef void ehs_prop_density():
+
+
+
 # 
 # All major computation is done in C. Only remaining overhead is encountered in the
 # below function. For each of the (legal) C(52, 2) * C(50, 5) combinations that represent all 
@@ -370,15 +419,16 @@ def do_calc(numpy.int64_t os, int16[:, :] x, int16[:, :] y, int id):
     cdef numpy.int64_t x_shape = x.shape[0]
     cdef numpy.int64_t y_shape = y.shape[0]
     
-    
+    c = 0
 
+    
+    # cdef numpy.ndarray[int16, ndim=2] z = numpy.empty((x_shape * y_shape, x.shape[1] + y.shape[1] + 3), dtype=numpy.int16)
     z_memmap = numpy.memmap('results/river.npy', mode = 'r+', dtype = numpy.int16, shape = (x_shape * y_shape, x.shape[1] + y.shape[1] + 3), offset = os)
     cdef int16 [:, :] z_view = z_memmap[:]
     cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(7, dtype=numpy.int16)
     cdef int16 [:] oh_view = oh
 
 
-    c = 0
     for i in range(x_shape):
         t1=time.time()
         for j in range(y_shape):
@@ -393,19 +443,17 @@ def do_calc(numpy.int64_t os, int16[:, :] x, int16[:, :] y, int id):
         print('~' + str(t*(x_shape - i)//60) + ' minutes until finished. ' + str(100*(i/x_shape))[:4] + '% done     ', end = '\r')
     
 
-# 
-# 
-# De Dupe Da Dataset
-# 
-# 
 
 @cython.boundscheck(False) 
 @cython.wraparound(False)
-cpdef de_dupe_cp(int64 strt,int64 x_shape0,int64 y_shape0,int64 ndupes):
+cpdef de_dupe_c(int64 strt,int64 x_shape0,int64 y_shape0,int64 ndupes):
     z_mm = numpy.memmap('results/river.npy', mode = 'r+', dtype = numpy.int16, shape = (x_shape0 * y_shape0, 10))
     ND_mm = numpy.memmap('results/no_dupe_river.npy', mode = 'r+', dtype = numpy.float64, shape = (x_shape0 * (y_shape0-ndupes), 1))
+    ND_mm_fluff = numpy.memmap('results/fluffy.npy', mode = 'r+', dtype = numpy.float64, shape = (x_shape0 * (y_shape0), 1))
+    
     cdef int16 [:, :] z_view = z_mm[:]
     cdef numpy.float64_t [:, :] nd_view = ND_mm[:]
+    cdef numpy.float64_t [:, :] nd_fluff_view = ND_mm_fluff[:]
 
     cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(10, dtype=numpy.int16)
     cdef int16[:] oh_view = oh[:]
@@ -417,11 +465,37 @@ cpdef de_dupe_cp(int64 strt,int64 x_shape0,int64 y_shape0,int64 ndupes):
             oh_view[:] = z_view[cd][:]
             if(oh_view[0] != oh_view[1]):
                 nd_view[c][:] = (oh_view[8]+.5*oh_view[7]) / (oh_view[8]+oh_view[7]+oh_view[9])
+                nd_fluff_view[cd][:] = (oh_view[8]+.5*oh_view[7]) / (oh_view[8]+oh_view[7]+oh_view[9])
+                
                 c += 1
             cd += 1
             
 
-        
+
+@cython.boundscheck(False) 
+@cython.wraparound(False)
+cpdef fluff_2_lbls(int64 strt,int64 x_shape0,int64 y_shape0):
+    z_mm = numpy.memmap('results/river.npy', mode = 'r+', dtype = numpy.int16, shape = (x_shape0 * y_shape0, 10))
+    ND_mm_fluff = numpy.memmap('results/fluffy.npy', mode = 'r+', dtype = numpy.float64, shape = (x_shape0 * y_shape0, 1))
+    
+    lbls = numpy.load('results/lbls.npy', mmap_mode = 'r+')
+    cdef int[:] lbl_view = lbls[:]
+
+    cdef int16 [:, :] z_view = z_mm[:]
+    cdef numpy.float64_t [:, :] nd_fluff_view = ND_mm_fluff[:]
+
+    cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(10, dtype=numpy.int16)
+    cdef int16[:] oh_view = oh[:]
+
+    cdef int64 c = 0
+    cdef int64 cd = 0
+    for i in range(x_shape0):
+        for j in range(y_shape0):
+            if(z_view[cd][0] != z_view[cd][1]):
+                nd_fluff_view[cd][:] = lbl_view[c]
+                c += 1
+            cd += 1
+
     
 
 #
@@ -433,13 +507,147 @@ cpdef de_dupe_cp(int64 strt,int64 x_shape0,int64 y_shape0,int64 ndupes):
 def de_dupe(ndupes, x_shape0, y_shape0,new_file = False):
     if(new_file):
         z = numpy.memmap('results/no_dupe_river.npy', mode = 'w+', dtype = numpy.float64, shape = (x_shape0 * (y_shape0 - ndupes), 1))
+        z_fluff = numpy.memmap('results/fluffy.npy', mode = 'w+', dtype = numpy.float64, shape = (x_shape0 * (y_shape0), 1))
         z.flush()
+        z_fluff.flush()
 
-    de_dupe_cp(0, x_shape0, y_shape0, ndupes)
-        
+    de_dupe_c(0, x_shape0, y_shape0, ndupes)
+
     
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.initializedcheck(False)
+cdef void insertion_sort_inplace_cython_int16(int16[:] A):
+    cdef: 
+        int i, j
+        int16 key
+        int length_A = A.shape[0]
 
+    for j in range(1, length_A):
+        key = A[j]
+        i = j - 1
+        while (i >= 0) & (A[i] > key):
+            A[i + 1] = A[i]
+            i = i - 1
+        A[i + 1] = key
+
+
+
+cpdef prob_dist(numpy.float64_t[:, :] cntrs, int[:] lbs, numpy.float64_t[:, :] dist):
+    
+    cdef int16[:, :] x = nump2(52, 2)
+    cdef int16[:, :] y = nump2(52, 5)
+
+    y_shape_river = y.shape
+    x_shape_river = x.shape
+
+    cdef map[long, int] mp
+    cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(6, dtype=numpy.int16)
+    cdef numpy.ndarray[int16, ndim=1] oh_z = numpy.empty(5, dtype=numpy.int16)
+    cdef numpy.ndarray[numpy.float64_t, ndim=2] fluff = numpy.empty((y_shape_river[0], 1), dtype=numpy.float64)
+    cdef int16[:] oh_view = oh[:]
+    cdef int16[:] oh_z_view = oh_z[:]
+    cdef int16[:] oh_z_view_tmp = numpy.empty(5, dtype=numpy.int16)
+    cdef numpy.float64_t[:, :] fluff_view = numpy.memmap('results/fluffy.npy', mode = 'c', dtype = numpy.float64, shape = (x.shape[0] *y.shape[0], 1))[:]
+    
+    cdef int c, i, j, tt, k
+    cdef long t
+
+
+
+    # semi-pseudo hashmap for each possible public card runout. 
+    tmp = 0
+    for temp in y:
+        t = 1
+        
+        for helpful in range(5):
+            t += (47)**helpful * (temp[helpful] + 1)
+        # print(t)
+        mp[t] = tmp
+        tmp += 1
+        
+        
+
+    
+    river = numpy.memmap('results/no_dupe_river.npy', mode = 'r', dtype = numpy.float64, shape = (x.shape[0] * (y.shape[0] - 480200), 1))
+
+    x = nump2(52, 2)
+    y = nump2(52, 4)
+    ndupes = 0
+
+
+
+
+
+    for j in range(y.shape[0]):
+        oh_view[:2] = x[0]
+        oh_view[2:] = y[j]
+        if(contains_duplicates_turn(oh_view)):
+            ndupes += 1
+
+    print(ndupes)
+    # for each possible remaining card, we will store the subsequent index of the river cluster to which it responds.
+    prob_dist = numpy.memmap('results/prob_dist.npy', mode = 'w+', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - ndupes), 46))
+
+    
+    ndupes = 0
+    oh = numpy.empty(6, dtype=numpy.int16)
+    oh_view = oh[:]
+
+    for i in range(x.shape[0]):
+        # load current portion of dataset to memory using the offset. 
+        # fluff_view[:, :] = numpy.memmap('results/fluffy.npy', mode = 'c', dtype = numpy.float64, shape = (y_shape_river[0], 1), offset = i * y_shape_river[0] * 8)[:]
+        t1=time.time()
+        for j in range(y.shape[0]):
+            oh_view[:2] = x[i]
+            oh_view[2:] = y[j]
+            if(not contains_duplicates_turn(oh_view)):
+                oh_z_view[:4] = oh_view[2:]
+                c = 0
+                
+                for k in range(52):
+                    if(not contains_turn(oh_view, k)):
+
+                        oh_z_view_tmp[:] = oh_z_view[:]
+                        oh_z_view[4] = k
+
+                        insertion_sort_inplace_cython_int16(oh_z_view)
+                        t = 0
+                        for tt in range(5):
+                            t += (47**tt) * (oh_z_view[tt] + 1)
+                            print(oh_z_view[tt] + 1)
+
+                        print(t)
+                        prob_dist[ndupes][c] = fluff_view[y_shape_river[0]*i + mp[t]][0]
+                        oh_z_view[:] = oh_z_view_tmp[:]
+                        c += 1
+
+                print(ndupes)
+                print(prob_dist[ndupes])
+                ndupes += 1
+        
+        t2=time.time()
+        t = t2-t1
+        print('~' + str(t*(x.shape[0] - i)//60) + ' minutes until finished. ' + str(100*(i/x.shape[0]))[:4] + '% done     ', end = '\r')
+
+
+
+@cython.boundscheck(False) 
+@cython.wraparound(False)
+def turn_ehs(n, k, threads, new_file=False):
+    adjcntrs = numpy.load('results/adjcntrs.npy', mmap_mode = 'r+')
+    lbls = numpy.load('results/lbls.npy', mmap_mode = 'r+')
+    print(adjcntrs)
+    print(lbls)
+    cdef numpy.float64_t[:, :] cntrs = adjcntrs[:]
+    cdef int[:] lbs = lbls[:]
+
+    cdef numpy.float64_t[:, :] dist = euclidean_distances(cntrs, cntrs)[:]
+
+    print(euclidean_distances(cntrs, cntrs))
+
+    prob_dist(cntrs, lbs, dist)
 
 @cython.boundscheck(False) 
 @cython.wraparound(False)
@@ -452,14 +660,15 @@ def river_ehs(n, k, threads, new_file=False):
         z.flush()
 
     chunksize = len(x) // (threads-1)
-
+    print('Starting river EHS')    
     with concurrent.futures.ProcessPoolExecutor() as executor:
+        # change threads to appropriate number of workers for your system
         futures = []
         for i in range(threads-1):
-            
             strt = i * chunksize
             stp = ((i + 1) * chunksize) if i != (threads - 2) else len(x)
-            
+            print(strt, end = ' ')
+            print(stp)
             futures.append(executor.submit(do_calc, strt * y.shape[0] * 10 * 2, x[strt:stp], y, i))
         concurrent.futures.wait(futures)
 

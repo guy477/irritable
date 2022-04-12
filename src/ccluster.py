@@ -3,7 +3,7 @@ import ccluster
 import time
 import numpy as np
 from math import comb
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, MiniBatchKMeans
 
 
 if __name__ == '__main__':
@@ -16,7 +16,7 @@ if __name__ == '__main__':
     threads = 8
 
     # Would you like to precompute the centroids? Recommended.
-    precompute = False
+    precompute = True
 
     # If this is your first time running, make sure new_file is set to true.
     # This has only been tested on linux systems.
@@ -48,26 +48,28 @@ if __name__ == '__main__':
     ranks = ('2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A')
     suits = ('c', 'd', 'h', 's')
     dupe = 0
-    for i in range(comb(n, k)):
-        if(z[i][0] != z[i][1]):
-            # print(z[i])
-            # for j in range(7):
-            #     print(ranks[z[i][j]%13] + suits[z[i][j]//13], end = ' ')
-            # print(z[i][7:])
-            continue
-        else:
-            dupe += 1
+    # for i in range(comb(n, k)):
+    #     if(z[i][0] != z[i][1]):
+    #         # print(z[i])
+    #         # for j in range(7):
+    #         #     print(ranks[z[i][j]%13] + suits[z[i][j]//13], end = ' ')
+    #         # print(z[i][7:])
+    #         continue
+    #     else:
+    #         dupe += 1
+    dupe = 480200
 
     #########################################################################################################
     #                Before we cluster, we need to make sure to remove all invalid rows
     #           and calculate the ehs as a floating point value. This is the filtered/preped
     #                           input for the kmeans clustering algorithm
+    #       fluff is the exact same thing as no_dupe_river; only with sparcity for hashing purposes
     #########################################################################################################
 
     # # # # pylint: disable=no-member # # # #
     ccluster.de_dupe(dupe, comb(n, 2), comb(n, 5), new_file = True)
     zND = np.memmap('results/no_dupe_river.npy', mode = 'r', dtype = np.float64, shape = (comb(n, 2) * (comb(n, k) - dupe), 1))
-
+    fluff = np.memmap('results/fluffy.npy', mode = 'r', dtype = np.float64, shape = (comb(n, 2) * (comb(n, k)), 1))
 
     # c=-1
     # for i in range(z.shape[0] - 1, z.shape[0] - comb(n, k), -1):
@@ -92,23 +94,36 @@ if __name__ == '__main__':
     else:
         centers = None
 
+    #######
+    #
+    # I'm not sure if KMeans or MiniBatchKMeans works better...
+    #
+    #######
+    # kmean = KMeans(200, algorithm='full', init = centers, verbose=True, n_init=1).fit_predict(zND)
+    # np.save('results/clstrs', kmean)
 
-    kmean = KMeans(200, algorithm='full', init = centers, verbose=True, n_init=1).fit_predict(zND)
-    np.save('results/clstrs', kmean)
 
-    # kmean = np.load('results/clstrs.npy', mmap_mode = 'r')
+    centers = np.load('results/cntrs.npy', mmap_mode = 'r')
 
-    # print(kmean)
-    # dupe = 0 
-    # for i in range(comb(n, k)):
-    #     if(z[i][0] != z[i][1]):
-    #         # print(z[i])
-    #         for j in range(7):
-    #             print(ranks[z[i][j]%13] + suits[z[i][j]//13], end = ' ')
-    #         print(str(z[i][7:]) + str(kmean[i - dupe]))
+    k = MiniBatchKMeans(n_clusters = 200, batch_size=int((zND.shape[0] * 200)**.5), tol = 10e-7, max_no_improvement = None, init = centers, verbose=True, n_init=1).fit(zND)
 
-    #     else:
-    #         dupe += 1
+    np.save('results/adjcntrs', k.cluster_centers_)
+    np.save('results/lbls', k.labels_)
+
+    adjcntrs = np.load('results/adjcntrs.npy', mmap_mode = 'r')
+    lbls = np.load('results/lbls.npy', mmap_mode = 'r')
+
+    #########################################################################################################
+    #                This will convert the hashing compatible memory representation of the EHS
+    #                   values into the label value. I think this will be useful for turn
+    #            calculations; but I can't say for certain.. first time looking at this in months 
+    #########################################################################################################
+    ccluster.fluff_2_cntrs(comb(52, 2), comb(52, 5), dupe)
+
+    ## WIP DOES NOT WORK (I DONT THINK LMAO; AGAIN LOOKING AT THIS FOR THE FIRST TIME IN MONTHSSSS)
+    ccluster.turn_ehs(0, 0, 0, True)
+
+    turn_prob_dist = np.memmap('results/prob_dist.npy', mode = 'r', dtype = np.float32, shape = (comb(n, 2) * ((comb(n, 4) - 40425)), 46))
 
 
     #########################################################################################################
