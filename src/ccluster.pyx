@@ -8,6 +8,7 @@ import time
 import numpy
 import random
 import concurrent.futures
+import concurrent.futures
 
 cimport numpy
 cimport cython
@@ -315,6 +316,22 @@ def nump2(n, k):
         a[j] = numpy.add.accumulate(a[j])
     return a.T
 
+#
+# Taken from stack overflow. Fast list combination generator for C(n, k)
+#
+
+def nump2(n, k):
+    a = numpy.ones((k, n-k+1), dtype=numpy.int16)
+    a[0] = numpy.arange(n-k+1)
+    for j in range(1, k):
+        reps = (n-k+j) - a[j-1]
+        a = numpy.repeat(a, reps, axis=1)
+        ind = numpy.add.accumulate(reps)
+        a[j, ind[:-1]] = 1-reps[1:]
+        a[j, 0] = j
+        a[j] = numpy.add.accumulate(a[j])
+    return a.T
+
 
 # 
 # See if a card appears twice in the hand/table combo. Can be faster.
@@ -485,6 +502,8 @@ cdef void get_ehs_fast(int16[:] j, int16[:] twl_tiewinloss) nogil:
 
 
 
+
+
 # @cython.profile(True)
 @cython.boundscheck(False) 
 @cython.wraparound(False)
@@ -514,7 +533,7 @@ def do_calc(numpy.int64_t os, int16[:, :] x, int16[:, :] y, int dupes):
     cdef unsigned long long key
     for i in range(x_shape):
         t1=time.time()
-        for j in range(y_shape):
+        for j in range(y.shape[0]):
             oh_view[:2] = x[i]
             oh_view[2:] = y[j]
             if(not contains_duplicates(oh_view)):

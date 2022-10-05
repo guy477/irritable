@@ -11,3 +11,5 @@ src/__pycache__
 .*vscode
 DATA/*
 DATA
+.DS_Store
+src/.DS_Store

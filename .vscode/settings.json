@@ -1,3 +1,4 @@
 {
-    "python.pythonPath": "/home/g/anaconda3/envs/Poker/bin/python"
+    "python.pythonPath": "/home/g/anaconda3/envs/Poker/bin/python",
+    "pylint": "disable=unexpected-keyword-args"
 }
