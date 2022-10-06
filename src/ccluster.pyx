@@ -214,44 +214,34 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
                          " instance, None or an integer to be used as seed.")
 
     # Initialize result
-    # centers = numpy.zeros((k, X.shape[1]), numpy.float64, order="C")
+    centers = numpy.zeros((k, X.shape[1]), numpy.float64, order="C")
 
     # print(centers)
 
-    centers = numpy.reshape(numpy.linspace(0, 1, num = k*X.shape[1], dtype=numpy.float64), (-1, X.shape[1]))
+    #centers = numpy.reshape(numpy.linspace(0, 1, num = k*X.shape[1], dtype=numpy.float64), (-1, X.shape[1]))
     
-    print(centers)
+    #print(centers)
+
     # Sample first center and compute proposal
-    # rel_row = X[random_state.choice(X.shape[0], p=weights/weights.sum()), :]
-    # centers[0, :] = rel_row.todense().flatten() if sparse else rel_row
+    rel_row = X[random_state.choice(X.shape[0], p=weights/weights.sum()), :]
+    centers[0, :] = rel_row
     
     # print(list(map(numpy.linalg.norm, (X - centers[0:1, :])**2)))
     # print(numpy.reshape(euclidean_distances(X, centers[0:1, :], squared = True), newshape = X.shape[0]))
     # print(numpy.reshape(X, newshape=X.shape[0]))
     if afkmc2:
-        
-        #di = (numpy.array(list(map(numpy.linalg.norm, (X - centers[0:1, :])))))*weights
-        #print(di)
-        
-        di = numpy.min(euclidean_distances(X, centers[0:1, :], squared=True), axis=1)*weights
-        print(di)
-        print('euclidean^')
-        di = numpy.array(list(map(wasserstein_distance, X, centers[0:1, :] )))
-        
         # di = numpy.min(euclidean_distances(X, centers[0:1, :], squared=True), axis=1)*weights
+    
+        print(X)
+        print(centers[0,:])
         
-        # multiplying by weights seems to crash the program..
-        # print(di)
-        # di = numpy.reshape(euclidean_distances(X, centers[0:1, :], squared=False), newshape=(X.shape[0]))
-        # print(di)
+        di = numpy.fromiter((wasserstein_distance(xi, centers[0,:]) for xi in X), X.dtype, count=len(X))
         
         q = di/numpy.sum(di) + weights/numpy.sum(weights)  # Only the potentials
-        print(centers[0:1, :])
+        
         print(q)
         print(di)
-        print(numpy.sum(q))
-        print('^wasserstein: centers/q/di/sum(q)')
-    
+        
     else:
         q = numpy.copy(weights)
     # Renormalize the proposal distribution
@@ -266,9 +256,8 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
         q_cand = q[cand_ind]
         
         # Compute pairwise distances
-        #dist = euclidean_distances(X[cand_ind, :], centers[0:(i+1), :], squared=True)
+        dist = numpy.fromiter((wasserstein_distance(xi, X[cand_ind][0]) for xi in centers[0:(i+1)]), X.dtype, count=len(centers[0:(i+1)]))
         
-        dist = (numpy.array(list(map(wasserstein_distance, X[cand_ind], centers[0:(i+1), :]))))
         
         # print(dist)
         # Compute potentials
@@ -539,9 +528,11 @@ def do_calc(numpy.int64_t os, int16[:, :] x, int16[:, :] y, int dupes):
             if(not contains_duplicates(oh_view)):
                 
                 get_ehs_fast(oh_view, z_view[cd][:])
-                
+
                 key = (one << oh_view[0]) | (one << oh_view[1]) | (one << oh_view[2]) | (one << oh_view[3]) | (one << oh_view[4]) | (one << oh_view[5]) 
                 
+                
+
                 z_f_view[cd] = (z_view[cd][1]+.5*z_view[cd][0]) / (z_view[cd][1]+z_view[cd][0]+z_view[cd][2])
                 mp_view[cd] = key
 
@@ -654,9 +645,9 @@ cpdef prob_dist(numpy.float32_t[:, :] cntrs, int[:] lbs, int64 dupes, boolean tu
         mp_turn_memmap.flush()
 
         mp_turn_view = mp_turn_memmap[:]
-        prob_dist = numpy.memmap('results/prob_dist_TURN.npy', mode = 'w+', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - ndupes), N_CARDS - T_CARDS - 1))
+        prob_dist = numpy.memmap('results/prob_dist_TURN.npy', mode = 'w+', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - ndupes), N_CARDS - T_CARDS + 1)) # 12 col
     else:
-        prob_dist = numpy.memmap('results/prob_dist_FLOP.npy', mode = 'w+', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - ndupes), N_CARDS - T_CARDS - 1))
+        prob_dist = numpy.memmap('results/prob_dist_FLOP.npy', mode = 'w+', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - ndupes), N_CARDS - T_CARDS + 1)) # 13 col -- both will need to change according to proper histogram schematics..
     
     prob_dist.flush()
 
@@ -698,7 +689,9 @@ cpdef prob_dist(numpy.float32_t[:, :] cntrs, int[:] lbs, int64 dupes, boolean tu
                         oh_z_view[T_CARDS - 1] = k
 
 
-                        insertion_sort_inplace_cython_int16(oh_z_view)
+
+                        # must sort table cards before using the mapping.. 
+                        insertion_sort_inplace_cython_int16(oh_z_view[2:])
                         
 
 
@@ -729,6 +722,7 @@ cpdef prob_dist(numpy.float32_t[:, :] cntrs, int[:] lbs, int64 dupes, boolean tu
         print('~' + str(t*(x.shape[0] - i)//60) + ' minutes until finished. ' + str(100*(i/x.shape[0]))[:4] + '% done     ', end = '\r')
     if(turn):
         mp_turn_memmap.flush()
+    prob_dist.flush()
     return ndupes
 
 
@@ -745,6 +739,9 @@ def flop_ehs(n, k, threads, dupes, new_file=False):
     cdef int16[:, :] x = nump2(n, 2)
     cdef int16[:, :] y = nump2(n, k-1)
 
+    print(num_dupes_turn(x, y))
+    print(num_dupes_turn(x, y))
+    print(num_dupes_turn(x, y))
 
     return prob_dist(cntrs, lbs, num_dupes_turn(x, y), False)
 
@@ -787,7 +784,7 @@ def num_dupes_flop(int16[:, :] x, int16[:, :] y):
     for j in range(y_shape):
         oh_view[:2] = x[0][:]
         oh_view[2:] = y[j][:]
-        if(contains_duplicates(oh_view)):
+        if(contains_duplicates_flop(oh_view)):
             cd += 1
     return cd
 
@@ -811,7 +808,7 @@ def num_dupes_turn(int16[:, :] x, int16[:, :] y):
     for j in range(y_shape):
         oh_view[:2] = x[0]
         oh_view[2:] = y[j]
-        if(contains_duplicates(oh_view)):
+        if(contains_duplicates_turn(oh_view)):
             cd += 1
     return cd
 

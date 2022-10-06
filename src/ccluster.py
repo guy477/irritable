@@ -1,6 +1,5 @@
 
 import ccluster
-import kmeans
 import time
 
 from scipy.stats import wasserstein_distance
@@ -31,6 +30,10 @@ def nump2(n, k):
 # unless you know what you're doing.
 k = 5
 n = 16
+rvr_clstrs = 20
+trn_clstrs = 40
+flp_clstrs = 40
+
 
 # Enter the number of threads for you system
 threads = 16
@@ -78,7 +81,7 @@ if precompute:
     t = time.time()
     
     print('precomputing centers')
-    centers = ccluster.kmc2(z, 10, chain_length=50, afkmc2=True)
+    centers = ccluster.kmc2(z, rvr_clstrs, chain_length=50, afkmc2=True)
     np.save('results/cntrs', centers)
 
     print('Time spent precalculating centers: ' + str((time.time() - t)/60) + 'm')
@@ -87,8 +90,9 @@ else:
 
 centers = np.load('results/cntrs.npy', mmap_mode = 'r')
 
-# miniK = MiniBatchKMeans(n_clusters = 200, batch_size=int((z.shape[0] * 200)**.5), tol = 10e-6, max_no_improvement = None, init = centers, verbose=True, n_init=1).fit(z)
-miniK = MiniBatchKMeans(n_clusters = 10, tol = 10e-6, max_no_improvement = None, verbose=True, n_init=1).fit(z)
+print(z)
+miniK = MiniBatchKMeans(n_clusters = rvr_clstrs, batch_size=rvr_clstrs//4, tol = 10e-6, max_no_improvement = None, init = centers, verbose=False, n_init=1).fit(z)
+# miniK = MiniBatchKMeans(n_clusters = 10, batch_size = 1, tol = 10e-10, max_no_improvement = None, verbose=True, max_no_improvement=, n_init=1).fit(z)
 
 np.save('results/adjcntrs', miniK.cluster_centers_)
 np.save('results/lbls', miniK.labels_)
@@ -104,15 +108,12 @@ print(len(counts))
 print(sorted(centers))
 
 dupes = ccluster.turn_ehs(0, 0, 0, dupes, True)
+print(dupes)
+print(dupes)
+print(dupes)
 
 
 turn_prob_dist = np.memmap('results/prob_dist_TURN.npy', mode = 'r', dtype = np.float32, shape = (comb(n, 2) * ((comb(n, 4) - dupes)), n - k - 1))
-
-# we will now like to refluff the labels to allow for index mappings
-
-pd.DataFrame(turn_prob_dist)[:(comb(n, 4) - dupes)].to_excel('turn_prob_dist_2c3c.xlsx')
-
-# pd.DataFrame(turn_prob_dist)[(comb(n, 4) - dupes)*7:(comb(n, 4) - dupes)*8].to_excel('turn_prob_dist_2c3c.xlsx')
 
 
 #########################################################################################################
@@ -140,17 +141,18 @@ if precompute:
     t = time.time()
     
     print('precomputing centers ---- TURN')
-    centers_TURN = ccluster.kmc2(turn_prob_dist, 10, chain_length=50, afkmc2=True)
+    centers_TURN = ccluster.kmc2(turn_prob_dist, trn_clstrs, chain_length=50, afkmc2=True)
     np.save('results/cntrs_TURN', centers_TURN)
 
     print('Time spent precalculating centers: ' + str((time.time() - t)/60) + 'm')
 else:
     centers_TURN = None
 
+
 centers_TURN = np.load('results/cntrs_TURN.npy', mmap_mode = 'r')
 
-# miniK = MiniBatchKMeans(n_clusters = 100, batch_size=int((turn_prob_dist.shape[0] * 200)**.5), tol = 10e-6, max_no_improvement = None, init = centers_TURN, verbose=True, n_init=1).fit(turn_prob_dist)
-miniK = MiniBatchKMeans(n_clusters = 10, tol = 10e-6, max_no_improvement = None, verbose=True, n_init=1).fit(turn_prob_dist)
+miniK = MiniBatchKMeans(n_clusters = trn_clstrs, batch_size=trn_clstrs//6, tol = 10e-6, max_no_improvement = None, init = centers_TURN, verbose=False, n_init=1).fit(turn_prob_dist)
+# miniK = MiniBatchKMeans(n_clusters = 10, tol = 10e-6, max_no_improvement = None, verbose=False, n_init=1).fit(turn_prob_dist)
 
 np.save('results/adjcntrs_TURN', miniK.cluster_centers_)
 np.save('results/lbls_TURN', miniK.labels_)
@@ -163,8 +165,41 @@ unique, counts = np.unique(adjcntrs, return_counts=True)
 print(centers_TURN)
 
 dupes = ccluster.flop_ehs(n, k, 0, True)
+
+
+
 print(adjcntrs)
 print(lbls)
 
-flop_prob_dist = np.memmap('results/prob_dist_FLOP.npy', mode = 'r', dtype = np.float16, shape = (comb(n, 2) * ((comb(n, 3) - dupes)), n - k - 2))
-pd.DataFrame(flop_prob_dist).to_excel('flop_prob_dist_ALL.xlsx')
+flop_prob_dist = np.memmap('results/prob_dist_FLOP.npy', mode = 'r', dtype = np.float32, shape = (comb(n, 2) * ((comb(n, 3) - dupes)), n - k - 2))
+
+#########################################################################################################
+#########################################################################################################
+
+
+#########################################################################################################
+
+
+if precompute:
+    t = time.time()
+    
+    print('precomputing centers ---- FLOP')
+    centers_FLOP = ccluster.kmc2(flop_prob_dist, flp_clstrs, chain_length=50, afkmc2=True)
+    np.save('results/cntrs_FLOP', centers_FLOP)
+
+    print('Time spent precalculating centers: ' + str((time.time() - t)/60) + 'm')
+else:
+    centers_FLOP = None
+
+centers_FLOP = np.load('results/cntrs_FLOP.npy', mmap_mode = 'r')
+
+miniK = MiniBatchKMeans(n_clusters = flp_clstrs, batch_size=flp_clstrs//8, tol = 10e-6, max_no_improvement = None, init = centers_FLOP, verbose=False, n_init=1).fit(flop_prob_dist)
+# miniK = MiniBatchKMeans(n_clusters = 10, tol = 10e-6, max_no_improvement = None, verbose=False, n_init=1).fit(turn_prob_dist)
+
+
+np.save('results/adjcntrs_FLOP', miniK.cluster_centers_)
+np.save('results/lbls_FLOP', miniK.labels_)
+
+
+adjcntrs = np.load('results/adjcntrs_FLOP.npy', mmap_mode = 'r')
+lbls = np.load('results/lbls_FLOP.npy', mmap_mode = 'r')
