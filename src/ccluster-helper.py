@@ -6,10 +6,11 @@ import numpy
 # python ccluster-helper.py build_ext --inplace
 setup(
     ext_modules = cythonize("ccluster.pyx"),
-    include_dirs=[numpy.get_include()]
+    include_dirs=[numpy.get_include()],
+    
 )
 
 # setup(
-#     ext_modules = cythonize("cykmeans.pyx"),
+#     ext_modules = cythonize("test.pyx"),
 #     include_dirs=[numpy.get_include()]
 # )

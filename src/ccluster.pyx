@@ -1,29 +1,39 @@
 
 #!/usr/bin/env python3
+#cython: language_level=3
 # -*- coding: utf-8 -*-
 # distutils: language = c++
-# emd.pyx
+
 
 import time
-import numpy
+
 import random
 import concurrent.futures
 import concurrent.futures
 
+import numpy
 cimport numpy
 cimport cython
+numpy.import_array()
 
 from cython.parallel import prange
 
-
 from libcpp.map cimport map as mapp
 
+from libc.stdlib cimport calloc, free
 from libc.stdio cimport FILE, fopen, fwrite, fscanf, fclose, fprintf
 # cython: profile=True
 from sklearn.metrics.pairwise import euclidean_distances
 from scipy.spatial.distance import pdist, squareform
-from scipy.stats import wasserstein_distance
+
 from sklearn.utils import check_array
+
+"""
+Wraper for C EMD implementation
+"""
+from scipy.spatial.distance import cdist
+
+
 
 ctypedef numpy.uint8_t uint8
 ctypedef numpy.uint16_t uint16
@@ -180,11 +190,16 @@ cdef unsigned int cy_evaluate(unsigned long long cards, unsigned int num_cards) 
             return retval
 
 
+
+#####################
+#####################
+
+
 ######################
 # https://github.com/obachem/kmc2/blob/master/kmc2.pyx
 # 
-######################
-def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
+###################### 
+def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None): 
     """Cython implementation of k-MC2 and AFK-MC2 seeding
     
     Args:
@@ -201,12 +216,14 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
     cdef numpy.intp_t j, curr_ind
     cdef double cand_prob, curr_prob
     cdef double[::1] q_cand, p_cand, rand_a
+    
+    cdef float32[:, :]XX = numpy.empty((len(X), len(X[0])), dtype = numpy.float32)
 
-    # Handle input
-    X = check_array(X, accept_sparse="csr", dtype=numpy.float64, order="C")    
-    sparse = not isinstance(X, numpy.ndarray)
+    #XX[:] = X[:]
+        
+    sparse = False
     if weights is None:
-        weights = numpy.ones(X.shape[0], dtype=numpy.float64)
+        weights = numpy.ones(XX.shape[0], dtype=numpy.float32)
     if random_state is None or isinstance(random_state, int):
         random_state = numpy.random.RandomState(random_state)
     if not isinstance(random_state, numpy.random.RandomState):
@@ -214,28 +231,33 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
                          " instance, None or an integer to be used as seed.")
 
     # Initialize result
-    centers = numpy.zeros((k, X.shape[1]), numpy.float64, order="C")
+
+    cntrs = numpy.zeros((k, X.shape[1]), dtype=numpy.float32)
 
     # print(centers)
 
-    #centers = numpy.reshape(numpy.linspace(0, 1, num = k*X.shape[1], dtype=numpy.float64), (-1, X.shape[1]))
+    #centers = numpy.reshape(numpy.linspace(0, 1, num = k*X.shape[1], dtype=float64), (-1, X.shape[1]))
     
     #print(centers)
 
     # Sample first center and compute proposal
-    rel_row = X[random_state.choice(X.shape[0], p=weights/weights.sum()), :]
-    centers[0, :] = rel_row
+
+    print(X[random_state.choice(X.shape[0], p=weights/weights.sum())])
+    cntrs[0] = X[random_state.choice(X.shape[0], p=weights/weights.sum())]
+
+    
     
     # print(list(map(numpy.linalg.norm, (X - centers[0:1, :])**2)))
     # print(numpy.reshape(euclidean_distances(X, centers[0:1, :], squared = True), newshape = X.shape[0]))
     # print(numpy.reshape(X, newshape=X.shape[0]))
+    
     if afkmc2:
         # di = numpy.min(euclidean_distances(X, centers[0:1, :], squared=True), axis=1)*weights
     
         print(X)
-        print(centers[0,:])
+        print(cntrs[0])
         
-        di = numpy.fromiter((wasserstein_distance(xi, centers[0,:]) for xi in X), X.dtype, count=len(X))
+        di = numpy.fromiter((emd_cp(1, xi, cntrs[0]) for xi in X), numpy.float32, count=X.shape[0])
         
         q = di/numpy.sum(di) + weights/numpy.sum(weights)  # Only the potentials
         
@@ -248,41 +270,45 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
     q = q / numpy.sum(q)
 
     for i in range(k-1):
+        print(i)
         t1 = time.time()
         # Draw the candidate indices
-        cand_ind = random_state.choice(X.shape[0], size=(chain_length), p=q).astype(numpy.intp)
+        cand_ind = random_state.choice(X.shape[0], size=(chain_length), p=q).astype(dtype=numpy.intp)
         
         # Extract the proposal probabilities
-        q_cand = q[cand_ind]
-        
+        q_cand = q[cand_ind].astype(numpy.double)
+        #print(X[cand_ind].flatten())
+        #x_view[:] = numpy.empty(cand_ind.shape[0], dtype=type(defff))
+        #print(cand_ind)
+        #print('asdfasdfasdfasdfasdfasdf')
+        #print('asdfasdfljasdfl;kjasl;kfd')
+        #print(X[cand_ind[0]])
+        #x_view[:] = [X[X] for X in cand_ind]
+
         # Compute pairwise distances
-        dist = numpy.fromiter((wasserstein_distance(xi, X[cand_ind][0]) for xi in centers[0:(i+1)]), X.dtype, count=len(centers[0:(i+1)]))
+        dist = [[emd_cp(1, xi, X[cand_ind[yi]]) for yi in range(len(cand_ind))] for xi in cntrs[0:(i+1)]]
         
-        
-        # print(dist)
         # Compute potentials
         # p_cand = numpy.min(dist, axis=1)*weights[cand_ind]
-        p_cand = numpy.min(dist)*weights[cand_ind]
+        p_cand = numpy.min(dist).astype(numpy.double)*weights[cand_ind].astype(numpy.double)
         # p_cand = dist[0]*weights[cand_ind]
-        
         
         # Compute acceptance probabilities
         rand_a = random_state.random_sample(size=(chain_length))
-        with nogil, cython.boundscheck(False), cython.wraparound(False), cython.cdivision(True):
+        with cython.boundscheck(False), cython.wraparound(False), cython.cdivision(True):
             # Markov chain
             for j in range(q_cand.shape[0]):
-                cand_prob = p_cand[j]/q_cand[j]
+                cand_prob = (p_cand[j])/(q_cand[j])
                 if j == 0 or curr_prob == 0.0 or cand_prob/curr_prob > rand_a[j]:
                     # Init new chain             Metropolis-Hastings step
                     curr_ind = j
                     curr_prob = cand_prob
-        rel_row = X[cand_ind[curr_ind], :]
         # centers[i+1, :] = rel_row.todense().flatten() if sparse else rel_row
-        centers[i+1, :] = rel_row
+        cntrs[i+1] = X[cand_ind[curr_ind]]
         t2=time.time()
         t = t2-t1
         print('~' + str(t*(k - 1 - i)//60) + ' minutes until finished. ' + str(100*(i/(k-1)))[:4] + '% done     ', end = '\r')
-    return centers
+    return cntrs
 
 
 
@@ -308,19 +334,6 @@ def nump2(n, k):
 #
 # Taken from stack overflow. Fast list combination generator for C(n, k)
 #
-
-def nump2(n, k):
-    a = numpy.ones((k, n-k+1), dtype=numpy.int16)
-    a[0] = numpy.arange(n-k+1)
-    for j in range(1, k):
-        reps = (n-k+j) - a[j-1]
-        a = numpy.repeat(a, reps, axis=1)
-        ind = numpy.add.accumulate(reps)
-        a[j, ind[:-1]] = 1-reps[1:]
-        a[j, 0] = j
-        a[j] = numpy.add.accumulate(a[j])
-    return a.T
-
 
 # 
 # See if a card appears twice in the hand/table combo. Can be faster.
@@ -468,26 +481,291 @@ cdef void get_ehs_fast(int16[:] j, int16[:] twl_tiewinloss) nogil:
     
 
 
+# the extra arrays after v_values are empty arrays to be filled by the funciton.
+# for best performance, it is up to you to define these empty arrays outside of heavy looping.
+cdef float32 emd_c(int p, float32[:] u_values, float32[:] v_values, float32[:] all_values,float32[:] all_valuesa, float32[:] all_valuesaa, float32[:] deltas, u_weights=None, v_weights=None):
+    r"""
+    Compute, between two one-dimensional distributions :math:`u` and
+    :math:`v`, whose respective CDFs are :math:`U` and :math:`V`, the
+    statistical distance that is defined as:
+
+    .. math::
+
+        l_p(u, v) = \left( \int_{-\infty}^{+\infty} |U-V|^p \right)^{1/p}
+
+    p is a positive parameter; p = 1 gives the Wasserstein distance, p = 2
+    gives the energy distance.
+
+    Parameters
+    ----------
+    u_values, v_values : array_like
+        Values observed in the (empirical) distribution.
+    u_weights, v_weights : array_like, optional
+        Weight for each value. If unspecified, each value is assigned the same
+        weight.
+        `u_weights` (resp. `v_weights`) must have the same length as
+        `u_values` (resp. `v_values`). If the weight sum differs from 1, it
+        must still be positive and finite so that the weights can be normalized
+        to sum to 1.
+
+    Returns
+    -------
+    distance : float
+        The computed distance between the distributions.
+
+    Notes
+    -----
+    The input distributions can be empirical, therefore coming from samples
+    whose values are effectively inputs of the function, or they can be seen as
+    generalized functions, in which case they are weighted sums of Dirac delta
+    functions located at the specified values.
+
+    References
+    ----------
+    .. [1] Bellemare, Danihelka, Dabney, Mohamed, Lakshminarayanan, Hoyer,
+           Munos "The Cramer Distance as a Solution to Biased Wasserstein
+           Gradients" (2017). :arXiv:`1705.10743`.
+
+    """
+    #u_values, u_weights = _validate_distribution(u_values, u_weights)
+    #v_values, v_weights = _validate_distribution(v_values, v_weights)
+
+    insertion_sort_inplace_cython_float32(u_values)
+    insertion_sort_inplace_cython_float32(v_values)
+
+    # u_sorter = numpy.argsort(u_values)
+    # v_sorter = numpy.argsort(v_values)
+
+    cdef int i
+    cdef int all_len = len(u_values) + len(v_values)
+    
+    #cdef float32[:] all_values = numpy.empty(all_len, dtype = numpy.float32)
+    #cdef float32[:] all_valuesa = numpy.empty(all_len-1, dtype = numpy.float32)
+    #cdef float32[:] all_valuesaa = numpy.empty(all_len-1, dtype = numpy.float32)
+    #cdef float32[:] deltas = numpy.empty(all_len-1, dtype = numpy.float32)
+
+    # all_values[:len(u_values)] = u_values
+    # all_values[len(u_values):] = v_values
+
+    insertion_sort_inplace_cython_float32(all_values)
+    
+    for i in range(len(u_values)):
+        all_values[i] = u_values[i]
+    
+    for i in range(len(u_values), all_len):
+        all_values[i] = v_values[i-len(u_values)]
+
+    for i in range(all_len-1):
+        deltas[i] = all_values[i+1] - all_values[i]
+        
 
 
 
-# @cython.boundscheck(False) 
-# @cython.wraparound(False)
-# cdef void ehs_prop_density():
+    return all_ind(u_values, v_values, all_values, all_valuesa, all_valuesaa, deltas)
+
+cpdef float32 emd_cp(int p, float32[:] u_values, float32[:] v_values, u_weights=None, v_weights=None):
+    r"""
+    Compute, between two one-dimensional distributions :math:`u` and
+    :math:`v`, whose respective CDFs are :math:`U` and :math:`V`, the
+    statistical distance that is defined as:
+
+    .. math::
+
+        l_p(u, v) = \left( \int_{-\infty}^{+\infty} |U-V|^p \right)^{1/p}
+
+    p is a positive parameter; p = 1 gives the Wasserstein distance, p = 2
+    gives the energy distance.
+
+    Parameters
+    ----------
+    u_values, v_values : array_like
+        Values observed in the (empirical) distribution.
+    u_weights, v_weights : array_like, optional
+        Weight for each value. If unspecified, each value is assigned the same
+        weight.
+        `u_weights` (resp. `v_weights`) must have the same length as
+        `u_values` (resp. `v_values`). If the weight sum differs from 1, it
+        must still be positive and finite so that the weights can be normalized
+        to sum to 1.
+
+    Returns
+    -------
+    distance : float
+        The computed distance between the distributions.
+
+    Notes
+    -----
+    The input distributions can be empirical, therefore coming from samples
+    whose values are effectively inputs of the function, or they can be seen as
+    generalized functions, in which case they are weighted sums of Dirac delta
+    functions located at the specified values.
+
+    References
+    ----------
+    .. [1] Bellemare, Danihelka, Dabney, Mohamed, Lakshminarayanan, Hoyer,
+           Munos "The Cramer Distance as a Solution to Biased Wasserstein
+           Gradients" (2017). :arXiv:`1705.10743`.
+
+    """
+    #u_values, u_weights = _validate_distribution(u_values, u_weights)
+    #v_values, v_weights = _validate_distribution(v_values, v_weights)
+
+    insertion_sort_inplace_cython_float32(u_values)
+    insertion_sort_inplace_cython_float32(v_values)
+
+    # u_sorter = numpy.argsort(u_values)
+    # v_sorter = numpy.argsort(v_values)
+
+    
+    all_len = len(u_values) + len(v_values)
+    cdef float32[:] all_values = numpy.empty(all_len, dtype = numpy.float32)
+    cdef float32[:] all_valuesa = numpy.empty(all_len-1, dtype = numpy.float32)
+    cdef float32[:] all_valuesaa = numpy.empty(all_len-1, dtype = numpy.float32)
+    cdef float32[:] deltas = numpy.empty(all_len-1, dtype = numpy.float32)
+
+    all_values[:len(u_values)] = u_values
+    all_values[len(u_values):] = v_values
+
+    insertion_sort_inplace_cython_float32(all_values)
+    
+
+    for i in range(all_len-1):
+        deltas[i] = all_values[i+1] - all_values[i]
 
 
 
+    return all_ind(u_values, v_values, all_values, all_valuesa, all_valuesaa, deltas)
 
-# 
-# All major computation is done in C. Only remaining overhead is encountered in the
-# below function. For each of the (legal) C(52, 2) * C(50, 5) combinations that represent all 
-# of hero's hand/table combos we make C(45, 2) comparisons with the other legal villian hands.
-# The cumulative comparisons done is somewhere between (C(52, 7) * C(45, 2)) and 
-# (C(52, 2) * C(52, 5) * C(45, 2)). Most of the current optimizations come in the way of
-# memory management (minimizing reads/writes to existing/new locations).
-# 
-# Will formally calculate another time... ~ it go fast ~ but it can go a good bit faster.
-# 
+
+def _validate_distribution(values, weights):
+    """
+    Validate the values and weights from a distribution input of `cdf_distance`
+    and return them as ndarray objects.
+
+    Parameters
+    ----------
+    values : array_like
+        Values observed in the (empirical) distribution.
+    weights : array_like
+        Weight for each value.
+
+    Returns
+    -------
+    values : ndarray
+        Values as ndarray.
+    weights : ndarray
+        Weights as ndarray.
+
+    """
+    # Validate the value array.
+    values = numpy.asarray(values, dtype=float)
+    if len(values) == 0:
+        raise ValueError("Distribution can't be empty.")
+
+    # Validate the weight array, if specified.
+    if weights is not None:
+        weights = numpy.asarray(weights, dtype=float)
+        if len(weights) != len(values):
+            raise ValueError('Value and weight array-likes for the same '
+                             'empirical distribution must be of the same size.')
+        if numpy.any(weights < 0):
+            raise ValueError('All weights must be non-negative.')
+        if not 0 < numpy.sum(weights) < numpy.inf:
+            raise ValueError('Weight array-like sum must be positive and '
+                             'finite. Set as None for an equal distribution of '
+                             'weight.')
+
+        return values, weights
+
+    return values, None
+
+cpdef emd(int p, u_values, v_values, u_weights=None, v_weights=None):
+    r"""
+    Compute, between two one-dimensional distributions :math:`u` and
+    :math:`v`, whose respective CDFs are :math:`U` and :math:`V`, the
+    statistical distance that is defined as:
+
+    .. math::
+
+        l_p(u, v) = \left( \int_{-\infty}^{+\infty} |U-V|^p \right)^{1/p}
+
+    p is a positive parameter; p = 1 gives the Wasserstein distance, p = 2
+    gives the energy distance.
+
+    Parameters
+    ----------
+    u_values, v_values : array_like
+        Values observed in the (empirical) distribution.
+    u_weights, v_weights : array_like, optional
+        Weight for each value. If unspecified, each value is assigned the same
+        weight.
+        `u_weights` (resp. `v_weights`) must have the same length as
+        `u_values` (resp. `v_values`). If the weight sum differs from 1, it
+        must still be positive and finite so that the weights can be normalized
+        to sum to 1.
+
+    Returns
+    -------
+    distance : float
+        The computed distance between the distributions.
+
+    Notes
+    -----
+    The input distributions can be empirical, therefore coming from samples
+    whose values are effectively inputs of the function, or they can be seen as
+    generalized functions, in which case they are weighted sums of Dirac delta
+    functions located at the specified values.
+
+    References
+    ----------
+    .. [1] Bellemare, Danihelka, Dabney, Mohamed, Lakshminarayanan, Hoyer,
+           Munos "The Cramer Distance as a Solution to Biased Wasserstein
+           Gradients" (2017). :arXiv:`1705.10743`.
+
+    """
+    u_values, u_weights = _validate_distribution(u_values, u_weights)
+    v_values, v_weights = _validate_distribution(v_values, v_weights)
+
+    
+
+    u_sorter = numpy.argsort(u_values)
+    v_sorter = numpy.argsort(v_values)
+
+    all_values = numpy.concatenate((u_values, v_values))
+    all_values.sort(kind='mergesort')
+
+    # Compute the differences between pairs of successive values of u and v.
+    deltas = numpy.diff(all_values)
+
+    # Get the respective positions of the values of u and v among the values of
+    # both distributions.
+    u_cdf_indices = u_values[u_sorter].searchsorted(all_values[:-1], 'right')
+    v_cdf_indices = v_values[v_sorter].searchsorted(all_values[:-1], 'right')
+
+    print(u_cdf_indices)
+    print(v_cdf_indices)
+    print(deltas)
+
+    # Calculate the CDFs of u and v using their weights, if specified.
+    if u_weights is None:
+        u_cdf = u_cdf_indices / u_values.size
+    else:
+        u_sorted_cumweights = numpy.concatenate(([0],
+                                              numpy.cumsum(u_weights[u_sorter])))
+        u_cdf = u_sorted_cumweights[u_cdf_indices] / u_sorted_cumweights[-1]
+
+    if v_weights is None:
+        v_cdf = v_cdf_indices / v_values.size
+    else:
+        v_sorted_cumweights = numpy.concatenate(([0],
+                                              numpy.cumsum(v_weights[v_sorter])))
+        v_cdf = v_sorted_cumweights[v_cdf_indices] / v_sorted_cumweights[-1]
+
+    # Compute the value of the integral based on the CDFs.
+    # If p = 1 or p = 2, we avoid using numpy.power, which introduces an overhead
+    # of about 15%.
+    return numpy.sum(numpy.multiply(numpy.abs(u_cdf - v_cdf), deltas))
+    
 
 
 
@@ -506,17 +784,17 @@ def do_calc(numpy.int64_t os, int16[:, :] x, int16[:, :] y, int dupes):
     cd = 0
 
     # cdef numpy.ndarray[int16, ndim=2] z = numpy.empty((x_shape * y_shape, x.shape[1] + y.shape[1] + 3), dtype=numpy.int16)
-    z_memmap = numpy.memmap('results/river.npy', mode = 'r+', dtype = numpy.int16, shape = (x_shape * (y_shape - dupes), 3), offset = os)
+    z_memmap = numpy.memmap('results/river.npy', mode = 'r+', dtype = numpy.int16, shape = (x_shape * (y_shape - dupes), 3), offset = os )
     z_f_memmap = numpy.memmap('results/river_f.npy', mode = 'r+', dtype = numpy.float32, shape = (x_shape * (y_shape - dupes), 1), offset = os//3 * 2)
-    mp_memmap = numpy.memmap('results/map.npy', mode = 'r+', dtype = numpy.ulonglong, shape = (x_shape * (y_shape - dupes), 1), offset = os//3 * 4)
+    #mp_memmap = numpy.memmap('results/map.npy', mode = 'r+', dtype = numpy.ulonglong, shape = (x_shape * (y_shape - dupes), 1), offset = os//3 * 2)
     
-    cdef int16 [:, :] z_view = z_memmap[:]
-    cdef numpy.float32_t [:, :] z_f_view = z_f_memmap[:]
+    cdef int16 [:, :] z_view = z_memmap
+    cdef numpy.float32_t [:, :] z_f_view = z_f_memmap
     
-    cdef unsigned long long [:, :] mp_view = mp_memmap[:]
+    #cdef unsigned long long [:, :] mp_view = mp_memmap
 
     cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(7, dtype=numpy.int16)
-    cdef int16 [:] oh_view = oh
+    cdef int16[:] oh_view = oh[:]
 
     cdef unsigned long long one = 1
     cdef unsigned long long key
@@ -527,21 +805,77 @@ def do_calc(numpy.int64_t os, int16[:, :] x, int16[:, :] y, int dupes):
             oh_view[2:] = y[j]
             if(not contains_duplicates(oh_view)):
                 
-                get_ehs_fast(oh_view, z_view[cd][:])
+                get_ehs_fast(oh_view, z_view[cd])
 
-                key = (one << oh_view[0]) | (one << oh_view[1]) | (one << oh_view[2]) | (one << oh_view[3]) | (one << oh_view[4]) | (one << oh_view[5]) 
+                key = (one << oh_view[0]) | (one << oh_view[1]) | (one << oh_view[2]) | (one << oh_view[3]) | (one << oh_view[4]) | (one << oh_view[5]) | (one << oh_view[6]) 
                 
                 
-
                 z_f_view[cd] = (z_view[cd][1]+.5*z_view[cd][0]) / (z_view[cd][1]+z_view[cd][0]+z_view[cd][2])
-                mp_view[cd] = key
+
+                #mp_view[cd] = key
 
                 cd += 1
             
         t2=time.time()
         t = t2-t1
         print('~' + str(t*(x_shape - i)//60) + ' minutes until finished. ' + str(100*(i/x_shape))[:4] + '% done     ', end = '\r')
-    mp_memmap.flush()
+    # mp_memmap.flush()
+    z_f_memmap.flush()
+    z_memmap.flush()
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.initializedcheck(False)
+cdef void insertion_sort_inplace_cython_float32(float32[:] A):
+    cdef: 
+        int i, j
+        numpy.float32_t key
+        int length_A = A.shape[0]
+
+    for j in range(1, length_A):
+        key = A[j]
+        i = j - 1
+        while (i >= 0) & (A[i] > key):
+            A[i + 1] = A[i]
+            i = i - 1
+        A[i + 1] = key
+
+
+#set elents in A to the index they appear in B
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.initializedcheck(False)
+cdef float32 all_ind(float32[:] A, float32[:] AA, float32[:] B, float32[:] BB, float32[:] BBB, float32[:] deltas):
+    cdef: 
+        int32 i, j
+        numpy.float32_t key, keyy, pd
+        int32 length_A = len(A)
+        int32 length_AA = len(AA)
+        int32 length_B = len(B)
+
+    pd = 0
+
+    for j in range(length_B - 1):
+        key = B[j]
+        i = 0
+        while (i < length_A) & (A[i] <= key):
+            i = i + 1
+        BB[j] = i/length_A
+
+        i = 0
+        while (i < length_AA) & (AA[i] <= key):
+            i = i + 1
+        BBB[j] = i/length_AA
+
+    for i in range(length_B-1):
+
+        if(BB[i]>=BBB[i]):
+            pd += (BB[i] - BBB[i]) * deltas[i]
+        else:
+            pd += (BBB[i] - BB[i]) * deltas[i]
+    return pd
+        
 
 
 @cython.boundscheck(False)
@@ -567,7 +901,7 @@ cdef void insertion_sort_inplace_cython_int16(int16[:] A):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.initializedcheck(False)
-cpdef prob_dist(numpy.float32_t[:, :] cntrs, int[:] lbs, int64 dupes, boolean turn):
+cdef prob_dist_fun(int16[:, :] x, int16[:, :] y, float32[:, :] dist, float32[:, :] cntrs, int[:] lbs, int64 dupes, mp, boolean turn, int64 os): #single byte offset. multiply by #cols and #bytes in data type
 
     cdef int T_CARDS
     cdef int N_CARDS
@@ -579,90 +913,57 @@ cpdef prob_dist(numpy.float32_t[:, :] cntrs, int[:] lbs, int64 dupes, boolean tu
         N_CARDS = 16
         
     
-    cdef int16[:, :] x = nump2(N_CARDS, 2)
-    cdef int16[:, :] y = nump2(N_CARDS, T_CARDS)
-
-    y_shape_river = y.shape
-    x_shape_river = x.shape
-
-    cdef mapp[unsigned long long, int] mp
+    #cdef int16[:, :] x = nump2(N_CARDS, 2)
+    #cdef int16[:, :] y = nump2(N_CARDS, T_CARDS)
+    print(T_CARDS)
 
     cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(T_CARDS+1, dtype=numpy.int16)
-    cdef numpy.ndarray[int16, ndim=1] oh_z = numpy.empty(T_CARDS, dtype=numpy.int16)
+    cdef numpy.ndarray[int16, ndim=1] oh_z = numpy.empty(T_CARDS+2, dtype=numpy.int16)
+    cdef numpy.ndarray[int16, ndim=1] oh_z_tmp = numpy.empty(T_CARDS + 2, dtype=numpy.int16)
+
     
+    cdef numpy.ndarray[float32, ndim=2] prob_dist
+
     cdef int16[:] oh_view = oh[:]
     cdef int16[:] oh_z_view = oh_z[:]
-    cdef int16[:] oh_z_view_tmp = numpy.empty(T_CARDS, dtype=numpy.int16)
+    cdef int16[:] oh_z_view_tmp = oh_z_tmp[:]
     
     cdef int c, i, j, tt, k
     cdef long t
 
-
-    if turn:
-        mp_memmap = numpy.memmap('results/map.npy', mode = 'r+', dtype = numpy.ulonglong, shape = (x.shape[0] * (y.shape[0] - dupes), 1))
-    else:
-        mp_memmap = numpy.memmap('results/map_turn.npy', mode = 'r+', dtype = numpy.ulonglong, shape = (x.shape[0] * (y.shape[0] - dupes), 1))
-    
-    cdef unsigned long long [:, :] mp_view = mp_memmap[:]
     cdef unsigned long long [:, :] mp_turn_view
-    cdef numpy.float32_t[:, :] mp_z
+    cdef numpy.ndarray[float32, ndim=1] mp_z
 
-    
-    # semi-pseudo hashmap for each possible public card runout. 
-    tmp = 0
-    for temp in mp_view:
-        mp[temp[0]] = tmp
-        # print(temp[0])
-        tmp += 1
-
-
-    if turn:
-        dist = numpy.memmap('results/river_f.npy', mode = 'c', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - dupes), 1))
-        #mp_z = dist[:]
+    yy = nump2(N_CARDS, T_CARDS)
+    if(turn):
+        ndupes = num_dupes(x, yy)
     else:
-        dist = numpy.memmap('results/prob_dist_TURN.npy', mode = 'c', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - dupes), N_CARDS - T_CARDS))
-        mp_z = dist[:]
-
-
-        
-    x = nump2(N_CARDS, 2)
-    y = nump2(N_CARDS, T_CARDS - 1)
-
+        ndupes = num_dupes_turn(x, yy)
+     
     
+
+    mp_z = numpy.zeros(len(dist[0]), dtype = numpy.float32)
+    
+    cdef float32[:] mp_z_view = mp_z[:] 
+    
+
+    print(dist)
 
     # for each possible remaining card, we will store the subsequent index of the river cluster to which it responds.
-    ndupes = 0
-    for j in range(y.shape[0]):
-        oh_view[:2] = x[0]
-        oh_view[2:] = y[j]
-        if((turn and contains_duplicates_turn(oh_view)) or (not turn and contains_duplicates_flop(oh_view))):
-            ndupes += 1
-
-    print(ndupes)
-    # for each possible remaining card, we will store the subsequent index of the river cluster to which it responds.
     if turn:
-        mp_turn_memmap = numpy.memmap('results/map_turn.npy', mode = 'w+', dtype = numpy.ulonglong, shape = (x.shape[0] * (y.shape[0] - ndupes), 1))
-        mp_turn_memmap.flush()
-
-        mp_turn_view = mp_turn_memmap[:]
-        prob_dist = numpy.memmap('results/prob_dist_TURN.npy', mode = 'w+', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - ndupes), N_CARDS - T_CARDS + 1)) # 12 col
+        prob_dist = numpy.memmap('results/prob_dist_TURN.npy', mode = 'r+', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - dupes), N_CARDS - T_CARDS - 1), offset = os * 4 * (N_CARDS - T_CARDS-1))[:] # 10 col
     else:
-        prob_dist = numpy.memmap('results/prob_dist_FLOP.npy', mode = 'w+', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - ndupes), N_CARDS - T_CARDS + 1)) # 13 col -- both will need to change according to proper histogram schematics..
+        prob_dist = numpy.memmap('results/prob_dist_FLOP.npy', mode = 'r+', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - dupes), N_CARDS - T_CARDS - 1), offset = os * 4 * (N_CARDS - T_CARDS-1))[:] # 11 col -- both will need to change according to proper histogram schematics..
     
-    prob_dist.flush()
-
-    cdef numpy.float32_t[:, :] prob_dist_view = prob_dist[:]
-    
-
-
-    cntrss = numpy.array(cntrs).flatten()
-    #distrib = [wasserstein_distance(cntrs, cntrss) for c in range(cntrs.shape[0])]
-    #print(distrib)p
-    print(cntrss)
-
+    cdef float32[:, :] prob_dist_memview = prob_dist[:]
+    cdef float32[:] prob_dist_sing_memview = numpy.empty(N_CARDS-T_CARDS-1, dtype = numpy.float32)[:]
     cd = 0
-    oh = numpy.empty(T_CARDS+1, dtype=numpy.int16)
-    oh_view = oh[:]
+
+    cdef float32[:] all_values = numpy.empty(N_CARDS-T_CARDS-1 + len(dist[0]), dtype = numpy.float32)
+    cdef float32[:] all_valuesa = numpy.empty(N_CARDS-T_CARDS-2 + len(dist[0]), dtype = numpy.float32)
+    cdef float32[:] all_valuesaa = numpy.empty(N_CARDS-T_CARDS-2 + len(dist[0]), dtype = numpy.float32)
+    cdef float32[:] deltaaa = numpy.empty(N_CARDS-T_CARDS-2 + len(dist[0]), dtype = numpy.float32)
+
 
     cdef unsigned long long one = 1
     cdef unsigned long long key
@@ -671,102 +972,221 @@ cpdef prob_dist(numpy.float32_t[:, :] cntrs, int[:] lbs, int64 dupes, boolean tu
         # load current portion of dataset to memory using the offset. 
         # fluff_view[:, :] = numpy.memmap('results/fluffy.npy', mode = 'c', dtype = numpy.float32, shape = (y_shape_river[0], 1), offset = i * y_shape_river[0] * 8)[:]
         t1=time.time()
+        
         for j in range(y.shape[0]):
-            oh_view[:2] = x[i]
-            oh_view[2:] = y[j]
+            oh_view[:2] = x[i][:]
+            oh_view[2:] = y[j][:]
             if(not ((turn and contains_duplicates_turn(oh_view)) or (not turn and contains_duplicates_flop(oh_view)))):
-                oh_z_view[:T_CARDS-1] = oh_view[2:]
-                if(turn):
-                    mp_turn_view[cd] = (one << oh_view[0]) | (one << oh_view[1]) | (one <<oh_view[2]) | (one <<oh_view[3]) | (one <<oh_view[4])
-                    
+                oh_z_view[:T_CARDS+1] = oh_view
+                oh_z_view_tmp[:] = oh_z_view
+
+                prob_dist_sing_memview[:] = prob_dist_memview[cd][:]
+                
                 c = 0
                 # print(cd)
                 for k in range(N_CARDS):
                     if(not ((turn and contains_turn(oh_view, k)) or (not turn and contains_flop(oh_view, k)))):
                         ## for each datapoint (float value for winning), find the best center given 
                         
-                        oh_z_view_tmp[:] = oh_z_view[:]
-                        oh_z_view[T_CARDS - 1] = k
+                        
+                        oh_z_view[T_CARDS + 1] = k
 
-
+                        # print()
+                        # print()
 
                         # must sort table cards before using the mapping.. 
-                        insertion_sort_inplace_cython_int16(oh_z_view[2:])
+                        #insertion_sort_inplace_cython_int16(oh_z_view[2:])
                         
-
+                        # print([oh_z_view[xxx] for xxx in range(T_CARDS+2)])
+                        # print([oh_z_view_tmp[xxx] for xxx in range(T_CARDS+2)])
 
                         if(turn):
-                            key = (one << oh_z_view[0])  | (one << oh_z_view[1]) | (one << oh_z_view[2])  | (one << oh_z_view[3])  | (one << oh_z_view[4])  | (one << oh_z_view[5]) 
+                            key = (one << oh_z_view[0])  | (one << oh_z_view[1]) | (one << oh_z_view[2])  | (one << oh_z_view[3])  | (one << oh_z_view[4])  | (one << oh_z_view[5])  | (one << oh_z_view[6])
                         else:
-                            key = (one << oh_z_view[0])  | (one << oh_z_view[1]) | (one << oh_z_view[2])  | (one << oh_z_view[3])  | (one << oh_z_view[4]) 
-                        # prob_dist[cd][c] = wasserstein_distance(mp_z[key], cntrss)
+                            key = (one << oh_z_view[0])  | (one << oh_z_view[1]) | (one << oh_z_view[2])  | (one << oh_z_view[3])  | (one << oh_z_view[4]) | (one << oh_z_view[5])
                         
-                        # get the centers for each of the EQUALLY LIKELY next cards 
-                        if turn:
-                            prob_dist_view[cd][c] = cntrs[lbs[mp[key]]][0]
-                        else:
-                            #prob_dist[cd][c] = cntrs[lbs[mp[key]]][0]
-                            #print(mp_z[mp[key]])
-                            #print(cntrs[lbs[mp[key]]])
-                            prob_dist_view[cd][c] = wasserstein_distance(mp_z[mp[key]], cntrs[lbs[mp[key]]])
-                        #print(dist[mp[key]])
-                        #(mp_z[mp[key]][1]+.5*mp_z[mp[key]][0]) / (mp_z[mp[key]][1]+mp_z[mp[key]][0]+mp_z[mp[key]][2])
-                        
-                        oh_z_view[:] = oh_z_view_tmp[:]
-                        c += 1
+                        # offset key returned by os. 
 
+                        # prob_dist_memview[cd][c] = emd_c(1, dist[mp[key]], cntrs[lbs[mp[key]]])
+
+                        
+                        #reward distance from losing.. temp logic until i understand paper
+                        prob_dist_sing_memview[c] = emd_c(1, mp_z_view, cntrs[lbs[mp[key]]], all_values, all_valuesa, all_valuesaa, deltaaa)
+
+                        #print([dist[mp[key]][jjj] for jjj in range(len(dist[mp[key]]))])
+                        
+                        #print([cntrs[lbs[mp[key]]][jjj] for jjj in range(len(cntrs[lbs[mp[key]]]))])
+                        
+                        
+
+                        #oh_z_view[:] = oh_z_view_tmp
+                        c += 1
+                
+                insertion_sort_inplace_cython_float32(prob_dist_sing_memview)
+                prob_dist_memview[cd] = prob_dist_sing_memview[:]
+                #print([prob_dist_memview[cd][jjj] for jjj in range(len(prob_dist_memview[cd]))])
                 cd += 1
         
         t2=time.time()
         t = t2-t1
         print('~' + str(t*(x.shape[0] - i)//60) + ' minutes until finished. ' + str(100*(i/x.shape[0]))[:4] + '% done     ', end = '\r')
-    if(turn):
-        mp_turn_memmap.flush()
-    prob_dist.flush()
-    return ndupes
+
+
+    return dupes
 
 
 @cython.boundscheck(False) 
 @cython.wraparound(False)
-def flop_ehs(n, k, threads, dupes, new_file=False):
-    adjcntrs = numpy.load('results/adjcntrs_TURN.npy', mmap_mode = 'r+')
-    lbls = numpy.load('results/lbls_TURN.npy', mmap_mode = 'r+')
+cpdef flop_ehs(n, k, threads, dupes, new_file=False):
+    adjcntrs = numpy.load('results/adjcntrs_TURN.npy', mmap_mode = 'c')
+    lbls = numpy.load('results/lbls_TURN.npy', mmap_mode = 'c')
     
-    cdef numpy.float32_t[:, :] cntrs = adjcntrs[:]
-    cdef int[:] lbs = lbls[:]
+    cdef numpy.ndarray[float32, ndim = 2] cntrs = adjcntrs
+    cdef int[:] lbs = lbls
+
+    mp = {}
+    cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(k+1, dtype=numpy.int16)
+    cdef int16[:] oh_view = oh[:]
 
 
     cdef int16[:, :] x = nump2(n, 2)
     cdef int16[:, :] y = nump2(n, k-1)
 
-    print(num_dupes_turn(x, y))
-    print(num_dupes_turn(x, y))
-    print(num_dupes_turn(x, y))
+    
 
-    return prob_dist(cntrs, lbs, num_dupes_turn(x, y), False)
+    dupes = num_dupes_turn(x, y)
 
+    
+    if(new_file):
+        flop_dist = numpy.memmap('results/prob_dist_FLOP.npy', mode = 'w+', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - dupes), n - k-2))
+        flop_dist.flush()
+
+
+    cdef unsigned long long one = 1
+    cdef int cd = 0
+    
+    for i in range(x.shape[0]):
+        # load current portion of dataset to memory using the offset. 
+        # fluff_view[:, :] = numpy.memmap('results/fluffy.npy', mode = 'c', dtype = numpy.float32, shape = (y_shape_river[0], 1), offset = i * y_shape_river[0] * 8)[:]
+        t1=time.time()
+        for j in range(y.shape[0]):
+            oh_view[:2] = x[i]
+            oh_view[2:] = y[j]
+            if(not contains_duplicates_turn(oh_view)):
+                mp[(one << oh_view[0]) | (one << oh_view[1]) | (one <<oh_view[2]) | (one <<oh_view[3]) | (one <<oh_view[4]) | (one <<oh_view[5])] = cd
+                
+                cd+=1
+
+
+
+
+
+    cdef numpy.ndarray[float32, ndim=2] dist = numpy.memmap('results/prob_dist_TURN.npy', mode = 'c', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - dupes), n - k - 1))
+    cdef float32[:, :] dist_view = dist[:]
+
+    
+    y = nump2(n, k-2)
+    dupes = num_dupes_flop(x, y)
+
+    chunksize = len(x) // (threads-1)
+    print('Starting FLOP EHS')    
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        # change threads to appropriate number of workers for your system
+        futures = []
+        for i in range(threads-1):
+            strt = i * chunksize
+            stp = ((i + 1) * chunksize) if i != (threads - 2) else len(x)
+            print(strt, end = ' ')
+            print(stp)
+            prob_dist_fun(x[strt:stp], y, dist, cntrs, lbs, dupes, mp, False, strt * (y.shape[0]-dupes))
+            #futures.append(executor.submit(prob_dist_fun, x[strt:stp], y, adjcntrs, lbls, dupes, mp, False, strt * (y.shape[0]-dupes)))
+        #concurrent.futures.wait(futures)
+
+        #output = [f.result() for f in futures]
+    
+    return dupes
 
 @cython.boundscheck(False) 
 @cython.wraparound(False)
-def turn_ehs(n, k, threads, dupes, new_file=False):
-    adjcntrs = numpy.load('results/adjcntrs.npy', mmap_mode = 'r+')
-    lbls = numpy.load('results/lbls.npy', mmap_mode = 'r+')
+cpdef turn_ehs(n, k, threads, dupes, new_file=False):
+    adjcntrs = numpy.load('results/adjcntrs.npy', mmap_mode = 'c')
+    lbls = numpy.load('results/lbls.npy', mmap_mode = 'c')
     #print(adjcntrs)
     #print(lbls)
     #print(min(lbls))
     #print(max(lbls))
     
-    cdef numpy.float32_t[:, :] cntrs = adjcntrs[:]
-    cdef int[:] lbs = lbls[:]
+    cdef float32[:, :] cntrs = adjcntrs
+    cdef int[:] lbs = lbls
 
-    #print(euclidean_distances(cntrs, cntrs))
+    cdef int16[:, :] x = nump2(n, 2)
+    cdef int16[:, :] y = nump2(n, k)
 
-    return prob_dist(cntrs, lbs, dupes, True)
+    dupes = num_dupes(x, y)
+    
+    cdef unsigned long long one = 1
+    cdef unsigned long long keyy
+    cdef int cd = 0
+    mp = {}
+    cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(k+2, dtype=numpy.int16)
+    cdef int16[:] oh_view = oh[:]
+    
+    for i in range(x.shape[0]):
+        # load current portion of dataset to memory using the offset. 
+        # fluff_view[:, :] = numpy.memmap('results/fluffy.npy', mode = 'c', dtype = numpy.float32, shape = (y_shape_river[0], 1), offset = i * y_shape_river[0] * 8)[:]
+        t1=time.time()
+        for j in range(y.shape[0]):
+            oh_view[:2] = x[i]
+            oh_view[2:] = y[j]
+            if(not contains_duplicates(oh_view)):
+                
+                keyy = (one << oh_view[0]) | (one << oh_view[1]) | (one <<oh_view[2]) | (one <<oh_view[3]) | (one <<oh_view[4]) | (one <<oh_view[5]) | (one <<oh_view[6])
+                mp[keyy] = cd
+                cd+=1
+
+
+    cdef numpy.ndarray[float32, ndim=2] dist = numpy.memmap('results/river_f.npy', mode = 'c', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - dupes), 1))
+
+    cdef float32[:, :] dist_view = dist[:]
+    #numpy.ndarray[float32, ndim=2]
+    # begin turn considerations
+    
+    x = nump2(n, 2)
+    y = nump2(n, k-1)
+
+    dupes = num_dupes_turn(x, y)
+    print(dupes)
+    if(new_file):
+        prob_dist = numpy.memmap('results/prob_dist_TURN.npy', mode = 'w+', dtype = numpy.float32, shape = (x.shape[0] * (y.shape[0] - dupes), n - k - 1))
+        
+        prob_dist.flush()
+
+
+    
+
+    chunksize = len(x) // (threads-1)
+    print('Starting TURN EHS')    
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        # change threads to appropriate number of workers for your system
+        futures = []
+        for i in range(threads-1):
+            strt = i * chunksize
+            stp = ((i + 1) * chunksize) if i != (threads - 2) else len(x)
+            print(strt, end = ' ')
+            print(stp)
+            prob_dist_fun(x[strt:stp], y, dist[:], cntrs, lbs, dupes, mp, True, strt * (y.shape[0]-dupes))
+            #futures.append(executor.submit(prob_dist_fun, x[strt:stp], y, adjcntrs, lbls, dupes, mp, True, strt * (y.shape[0]-dupes)))
+        #concurrent.futures.wait(futures)
+
+        output = [f.result() for f in futures]
+    
+    return dupes
+
 
 
 @cython.boundscheck(False) 
 @cython.wraparound(False)
-def num_dupes_flop(int16[:, :] x, int16[:, :] y):
+cdef num_dupes_flop(int16[:, :] x, int16[:, :] y):
     cdef unsigned long long int total = 0
     cdef numpy.int64_t i, j, c
     cdef double t1, t2, t
@@ -782,15 +1202,15 @@ def num_dupes_flop(int16[:, :] x, int16[:, :] y):
 
     
     for j in range(y_shape):
-        oh_view[:2] = x[0][:]
-        oh_view[2:] = y[j][:]
-        if(contains_duplicates_flop(oh_view)):
+        oh[:2] = x[0][:]
+        oh[2:] = y[j][:]
+        if(contains_duplicates_flop(oh)):
             cd += 1
     return cd
 
 @cython.boundscheck(False) 
 @cython.wraparound(False)
-def num_dupes_turn(int16[:, :] x, int16[:, :] y):
+cdef num_dupes_turn(int16[:, :] x, int16[:, :] y):
     cdef unsigned long long int total = 0
     cdef numpy.int64_t i, j, c
     cdef double t1, t2, t
@@ -806,16 +1226,16 @@ def num_dupes_turn(int16[:, :] x, int16[:, :] y):
 
     
     for j in range(y_shape):
-        oh_view[:2] = x[0]
-        oh_view[2:] = y[j]
-        if(contains_duplicates_turn(oh_view)):
+        oh[:2] = x[0]
+        oh[2:] = y[j]
+        if(contains_duplicates_turn(oh)):
             cd += 1
     return cd
 
 # @cython.profile(True)
 @cython.boundscheck(False) 
 @cython.wraparound(False)
-def num_dupes(int16[:, :] x, int16[:, :] y):
+cdef num_dupes(int16[:, :] x, int16[:, :] y):
     cdef unsigned long long int total = 0
     cdef numpy.int64_t i, j, c
     cdef double t1, t2, t
@@ -831,9 +1251,9 @@ def num_dupes(int16[:, :] x, int16[:, :] y):
 
     
     for j in range(y_shape):
-        oh_view[:2] = x[0]
-        oh_view[2:] = y[j]
-        if(contains_duplicates(oh_view)):
+        oh[:2] = x[0]
+        oh[2:] = y[j]
+        if(contains_duplicates(oh)):
             cd += 1
     return cd
 
@@ -849,11 +1269,11 @@ def river_ehs(n, k, threads, new_file=False):
     if(new_file):
         z = numpy.memmap('results/river.npy', mode = 'w+', dtype = numpy.int16, shape = ((y.shape[0] - dupes) * x.shape[0], 3))
         z_f = numpy.memmap('results/river_f.npy', mode = 'w+', dtype = numpy.float32, shape = ((y.shape[0] - dupes) * x.shape[0], 1))
-        mp = numpy.memmap('results/map.npy', mode = 'w+', dtype = numpy.ulonglong, shape = ((y.shape[0] - dupes) * x.shape[0], 1))
+        #mp = numpy.memmap('results/map.npy', mode = 'w+', dtype = numpy.ulonglong, shape = ((y.shape[0] - dupes) * x.shape[0], 1))
             
         z.flush()
         z_f.flush()
-        mp.flush()
+        #mp.flush()
 
     chunksize = len(x) // (threads-1)
     print('Starting river EHS')    
