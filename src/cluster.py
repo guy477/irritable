@@ -33,6 +33,8 @@ rvr_clstrs = 40
 trn_clstrs = 80
 flp_clstrs = 90
 
+precompute = True
+
 
 # Enter the number of threads for you system
 threads = 16
@@ -113,11 +115,11 @@ lbls = np.load('results/lbls.npy', mmap_mode = 'r')
 #print(adjcntrs)
 
 #########################################################################################################
-# print('Saving River')
-# pd.DataFrame(z).to_excel('river_ehs_ALL.xlsx')
-# df = pd.DataFrame(list(map(lambda x: adjcntrs[x], lbls)))
-# df.to_excel('river_ehs_clst.xlsx')
-# print("saved")
+print('Saving River')
+pd.DataFrame(z[:int(comb(n, k)) - dupes]).to_excel('river_ehs_23s(24cards).xlsx')
+df = pd.DataFrame(list(map(lambda x: adjcntrs[x], lbls[:int(comb(n, k)) - dupes])))
+df.to_excel('river_ehs_clst_23s.xlsx')
+print("saved")
 #########################################################################################################
 
 
@@ -172,10 +174,10 @@ lbls = np.load('results/lbls_TURN.npy', mmap_mode = 'r')
 
 
 #########################################################################################################
-# print('Saving Turn')
-# pd.DataFrame(turn_prob_dist).to_excel('turn_prob_dist_ALL.xlsx')
-# pd.DataFrame(list(map(lambda x: adjcntrs[x], lbls))).to_excel('turn_prob_dist_clst.xlsx')
-# print("saved")
+print('Saving Turn')
+pd.DataFrame(turn_prob_dist[:int(comb(n, k-1)) - dupes]).to_excel('turn_prob_dist_23s(24cards).xlsx')
+pd.DataFrame(list(map(lambda x: adjcntrs[x], lbls[:int(comb(n, k-1)) - dupes]))).to_excel('turn_prob_dist_clst_23s.xlsx')
+print("saved")
 #########################################################################################################
 
 
@@ -212,7 +214,6 @@ if precompute:
 else:
     centers_FLOP = None
 
-
 t = time.time()
 print('computing flop clusters')
 miniK = MiniBatchKMeans(n_clusters = flp_clstrs, batch_size=(flp_clstrs//2)*(threads * 265), tol = 10e-8, max_no_improvement = None, init = centers_FLOP, verbose=False, n_init=1).fit(flop_prob_dist)
@@ -229,8 +230,8 @@ lbls = np.load('results/lbls_FLOP.npy', mmap_mode = 'r')
 #print(adjcntrs)
 
 #########################################################################################################
-# print('Saving Flop')
-# pd.DataFrame(flop_prob_dist).to_excel('flop_prob_dist_ALL.xlsx')
-# pd.DataFrame(list(map(lambda x: adjcntrs[x], lbls))).to_excel('flop_prob_dist_clst.xlsx')
-# print("saved")
+print('Saving Flop')
+pd.DataFrame(flop_prob_dist[:int(comb(n, k-2)) - dupes]).to_excel('flop_prob_dist_23s(24cards).xlsx')
+pd.DataFrame(list(map(lambda x: adjcntrs[x], lbls[:int(comb(n, k-2)) - dupes]))).to_excel('flop_prob_dist_clst_23s.xlsx')
+print("saved")
 #########################################################################################################

@@ -200,7 +200,7 @@ cdef unsigned int cy_evaluate(unsigned long long cards, unsigned int num_cards) 
 # https://github.com/obachem/kmc2/blob/master/kmc2.pyx
 # 
 ###################### 
-def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None): 
+def kmc2(float32[:, :] X, k, chain_length=200, afkmc2=True, random_state=None, weights=None): 
     """Cython implementation of k-MC2 and AFK-MC2 seeding
     
     Args:
@@ -219,15 +219,21 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
     cdef double[::1] q_cand, p_cand, rand_a
     cdef int N_CARDS = 24
 
-    cdef float32[:] ALL_X = numpy.empty(X.shape[0], dtype = numpy.float32)
+    #X = numpy.fromiter(X, numpy.float32[:], X.shape[0])
 
-    cdef float32[:] all_values = numpy.empty(X.shape[1]*2, dtype = numpy.float32)
-    cdef float32[:] all_valuesa = numpy.empty(X.shape[1]*2 - 1 , dtype = numpy.float32)
-    cdef float32[:] all_valuesaa = numpy.empty(X.shape[1]*2 - 1, dtype = numpy.float32)
-    cdef float32[:] deltaaa = numpy.empty(X.shape[1]*2 - 1, dtype = numpy.float32)
+    cdef float32[:] ALL_X = numpy.zeros(X.shape[0], dtype = numpy.float32)
+
+    cdef float32[:] all_values = numpy.zeros(X.shape[1]*2, dtype = numpy.float32)
+    cdef float32[:] all_valuesa = numpy.zeros(X.shape[1]*2 - 1 , dtype = numpy.float32)
+    cdef float32[:] all_valuesaa = numpy.zeros(X.shape[1]*2 - 1, dtype = numpy.float32)
+    cdef float32[:] deltaaa = numpy.zeros(X.shape[1]*2 - 1, dtype = numpy.float32)
 
     cdef float32 [:] ALL_X_VIEW = ALL_X[:]
-    cdef float32 [:, :] XX = X[:]
+
+    print('copying provided X to force memmap dereference. (experience segfault when calculating centers during the same program when the prob_dist memmap file is made.)')
+    cdef numpy.ndarray[float32, ndim=2] XX = numpy.zeros((X.shape[0], X.shape[1]), dtype = numpy.float32)
+    numpy.copyto(XX, X)
+
 
     sparse = False
     if weights is None:
@@ -241,17 +247,21 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
 
     cntrs = numpy.zeros((k, X.shape[1]), dtype=numpy.float32)
 
-    cntrs[0] = X[random_state.choice(X.shape[0], p=weights/weights.sum())]
+    #cntrs[0] = X[random_state.choice(X.shape[0], p=weights/weights.sum())]
 
     cdef float32[:,:] ctr = cntrs[:]
     
-    cdef float32[:] ct = cntrs[0]
+    #cdef float32[:] ct = cntrs[0]
     
+    print(X.shape)
+    print(XX[0])
+    print(emd_c(1, XX[0], ctr[0], all_values, all_valuesa, all_valuesaa, deltaaa))
+
     if afkmc2:
         
         # assumption free proposal distribution using EMD_C 
         for j in range(ALL_X_VIEW.shape[0]):
-            ALL_X_VIEW[j] = emd_c(1, XX[j], ct, all_values, all_valuesa, all_valuesaa, deltaaa)
+            ALL_X_VIEW[j] = emd_c(1, XX[j], ctr[0], all_values, all_valuesa, all_valuesaa, deltaaa)
         # following q value pulled from adriangoe afkmc2
 
         q = numpy.fromiter(ALL_X_VIEW, numpy.double, count=X.shape[0])
@@ -296,7 +306,7 @@ def kmc2(X, k, chain_length=200, afkmc2=True, random_state=None, weights=None):
                     curr_ind = j
                     curr_prob = cand_prob
         # centers[i+1, :] = rel_row.todense().flatten() if sparse else rel_row
-        ctr[i+1] = XX[cand_ind[curr_ind]]
+        ctr[i+1] = X[cand_ind[curr_ind]]
         t2=time.time()
         t = t2-t1
         print('~' + str(t*(k - 1 - i)//60) + ' minutes until finished. ' + str(100*(i/(k-1)))[:4] + '% done     ', end = '\r')
@@ -339,7 +349,7 @@ cdef numpy.npy_bool contains_duplicates(int16[:] XX) nogil:
     cdef unsigned int length
     cdef unsigned int countt = 0
     length = 7
-    for count in range(length):        
+    for count in range(length-1):        
         for countt in range(count+1, length):
             if(XX[count] == XX[countt]):
                 return True
@@ -359,7 +369,7 @@ cdef numpy.npy_bool contains_duplicates_turn(int16[:] XX) nogil:
     cdef unsigned int length
     cdef unsigned int countt = 0
     length = 6
-    for count in range(length):        
+    for count in range(length-1):        
         for countt in range(count+1, length):
             if(XX[count] == XX[countt]):
                 return True
@@ -373,7 +383,7 @@ cdef numpy.npy_bool contains_duplicates_flop(int16[:] XX) nogil:
     cdef unsigned int length
     cdef unsigned int countt = 0
     length = 5
-    for count in range(length):        
+    for count in range(length-1):        
         for countt in range(count+1, length):
             if(XX[count] == XX[countt]):
                 return True
@@ -800,7 +810,7 @@ cdef float32 all_ind(float32[:] A, float32[:] AA, float32[:] B, float32[:] BB, f
             i = i + 1
         BBB[j] = (i)/(length_AA)
 
-
+        
         if(BB[j]>BBB[j]):
             pd += (BB[j] - BBB[j]) * deltas[j]
         else:
@@ -832,7 +842,7 @@ cdef void insertion_sort_inplace_cython_int16(int16[:] A):
 
 @cython.boundscheck(False)
 @cython.initializedcheck(False)
-cdef prob_dist_fun(int16[:, :] x, int16[:, :] y, float32[:, :] dist, float32[:, :] cntrs, int[:] lbs, int64 dupes, boolean turn, int64 os): #single byte offset. multiply by #cols and #bytes in data type
+cpdef prob_dist_fun(int16[:, :] x, int16[:, :] y, float32[:, :] dist, float32[:, :] cntrs, int[:] lbs, int64 dupes, boolean turn, int64 os): #single byte offset. multiply by #cols and #bytes in data type
 
     cdef int T_CARDS
     cdef int N_CARDS
@@ -1016,7 +1026,7 @@ cdef prob_dist_fun(int16[:, :] x, int16[:, :] y, float32[:, :] dist, float32[:, 
         t = t2-t1
         print('~' + str(t*(x.shape[0] - i)//60) + ' minutes until finished. ' + str(100*(i/x.shape[0]))[:4] + '% done     ', end = '\r')
     '''
-
+    prob_dist.flush()
     return dupes
 
 
@@ -1094,6 +1104,30 @@ cpdef turn_ehs(n, k, threads, new_file=False):
     
     return dupes
 
+
+@cython.boundscheck(False) 
+@cython.wraparound(False)
+cpdef num_dupes_flop_cp(int16[:, :] x, int16[:, :] y):
+    cdef unsigned long long int total = 0
+    cdef numpy.int64_t i, j, c
+    cdef double t1, t2, t
+    cdef numpy.int64_t x_shape = x.shape[0]
+    cdef numpy.int64_t y_shape = y.shape[0]
+
+    cdef mapp[unsigned long long, int] mp
+
+    cd = 0
+
+    cdef numpy.ndarray[int16, ndim=1] oh = numpy.empty(5, dtype=numpy.int16)
+    cdef int16 [:] oh_view = oh
+
+    
+    for j in range(y_shape):
+        oh[:2] = x[0][:]
+        oh[2:] = y[j][:]
+        if(contains_duplicates_flop(oh)):
+            cd += 1
+    return cd
 
 
 @cython.boundscheck(False) 
